@@ -197,11 +197,11 @@ export function useUploadTraining() {
 export function useChatTrain() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ brainId, content }: { brainId: string; content: string }) =>
-      apiFetch<{ success: boolean; conceptsCreated: number }>("/api/train", {
+    mutationFn: async ({ brainId, message, history }: { brainId: string; message: string; history?: { role: string; content: string }[] }) =>
+      apiFetch<{ reply: string; stored: boolean; conceptsCreated: number }>("/api/train", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brainId, content }),
+        body: JSON.stringify({ brainId, message, history }),
       }),
     onSuccess: (_, { brainId }) => {
       qc.invalidateQueries({ queryKey: ["health", brainId] });

@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, FileText, Mic, File, CheckCircle2, Loader2, Sparkles, ChevronRight, AlertCircle, MessageSquare, Send } from "lucide-react";
+import { Upload, FileText, Mic, File, CheckCircle2, Loader2, Sparkles, ChevronRight, AlertCircle, MessageSquare, Send, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBrainContext, useTrainingJobs, useUploadTraining, useChatTrain, type TrainingJob } from "@/lib/hooks";
 
@@ -41,7 +41,7 @@ function StageTimeline({ status }: { status: string }) {
 
 interface ChatMessage {
   id: string;
-  role: "user" | "system";
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -95,18 +95,24 @@ export default function TrainPage() {
     const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", content: text };
     setChatMessages((prev) => [...prev, userMsg]);
 
+    // Build history for context (previous messages in format the API expects)
+    const apiHistory = chatMessages.map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content }));
+
     chatTrain.mutate(
-      { brainId: activeBrainId, content: text },
+      { brainId: activeBrainId, message: text, history: apiHistory },
       {
         onSuccess: (data) => {
-          const reply = data.conceptsCreated > 0
-            ? `Learned and stored as memory. Extracted ${data.conceptsCreated} new concept${data.conceptsCreated > 1 ? "s" : ""} for your knowledge graph.`
-            : "Learned and stored as a new memory in your brain.";
-          setChatMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: "system", content: reply }]);
+          // Show the AI's conversational reply
+          const badge = data.stored
+            ? data.conceptsCreated > 0
+              ? ` [Stored + ${data.conceptsCreated} concept${data.conceptsCreated > 1 ? "s" : ""} extracted]`
+              : " [Stored as memory]"
+            : "";
+          setChatMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: data.reply + badge }]);
           setTimeout(() => chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }), 100);
         },
         onError: (err) => {
-          setChatMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: "system", content: `Failed: ${err instanceof Error ? err.message : "Something went wrong"}` }]);
+          setChatMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: `Sorry, something went wrong: ${err instanceof Error ? err.message : "Unknown error"}` }]);
         },
       }
     );
@@ -243,15 +249,20 @@ export default function TrainPage() {
                     <div>
                       <p className="text-sm font-medium">Chat to Train</p>
                       <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                        Type any knowledge, facts, notes, or information you want your brain to learn. Each message gets embedded and stored as a memory.
+                        Chat naturally with your AI — it responds like ChatGPT while automatically storing everything you say as memories in your brain.
                       </p>
                     </div>
                   </div>
                 )}
                 {chatMessages.map((msg) => (
                   <div key={msg.id} className={cn("flex gap-2", msg.role === "user" ? "justify-end" : "justify-start")}>
+                    {msg.role === "assistant" && (
+                      <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Brain className="w-3 h-3 text-primary" />
+                      </div>
+                    )}
                     <div className={cn(
-                      "rounded-lg px-3 py-2 max-w-[85%] text-xs leading-relaxed",
+                      "rounded-lg px-3 py-2 max-w-[80%] text-xs leading-relaxed",
                       msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted/60 text-foreground"
                     )}>
                       <p className="whitespace-pre-wrap">{msg.content}</p>

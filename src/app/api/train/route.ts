@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
-import { createEmbedding, extractEntities, summarizeText } from "@/lib/openai";
+import { createEmbedding, extractEntities, summarizeText, openai } from "@/lib/openai";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
@@ -98,16 +98,16 @@ export async function GET(request: Request) {
   }
 }
 
-// PUT — Train via chat message (text input stored as memory)
+// PUT — Conversational training: AI responds like ChatGPT AND stores knowledge as memories
 export async function PUT(request: Request) {
   try {
     const supabase = createServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { brainId, content } = await request.json();
-    if (!brainId || !content || typeof content !== "string" || content.trim().length < 10) {
-      return NextResponse.json({ error: "brainId and content (min 10 chars) required" }, { status: 400 });
+    const { brainId, message, history } = await request.json();
+    if (!brainId || !message || typeof message !== "string" || !message.trim()) {
+      return NextResponse.json({ error: "brainId and message required" }, { status: 400 });
     }
 
     // Verify brain ownership
@@ -119,70 +119,102 @@ export async function PUT(request: Request) {
       .single();
     if (!brain) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
 
-    const text = content.trim();
+    const text = message.trim();
 
-    // Embed the text
-    const embedding = await createEmbedding(text);
-    const domain = getDomain(text);
-
-    // Store as memory
-    const { error: memErr } = await supabase.from("memories").insert({
-      brain_id: brainId,
-      content: text,
-      embedding,
-      source_type: "chat",
-      confidence_score: 0.85,
-      domain,
-      tags: [],
-      metadata: { source: "chat_training" },
-    });
-    if (memErr) throw new Error(memErr.message);
-
-    // Extract and store entities if text is substantial
+    // Store user message as memory (train the brain)
+    let stored = false;
     let conceptsCreated = 0;
-    if (text.length > 50) {
+    if (text.length >= 5) {
       try {
-        const { concepts, relationships } = await extractEntities(text);
-        for (const concept of concepts) {
-          const { data: existing } = await supabase
-            .from("concepts")
-            .select("id")
-            .eq("brain_id", brainId)
-            .eq("name", concept.name)
-            .single();
-          if (!existing) {
-            await supabase.from("concepts").insert({
-              brain_id: brainId,
-              name: concept.name,
-              description: concept.description,
-              domain: concept.domain,
-              importance_score: 0.6,
-            });
-            conceptsCreated++;
+        const embedding = await createEmbedding(text);
+        const domain = getDomain(text);
+
+        await supabase.from("memories").insert({
+          brain_id: brainId,
+          content: text,
+          embedding,
+          source_type: "chat",
+          confidence_score: 0.85,
+          domain,
+          tags: [],
+          metadata: { source: "chat_training" },
+        });
+        stored = true;
+
+        // Extract entities if text is substantial
+        if (text.length > 50) {
+          try {
+            const { concepts, relationships } = await extractEntities(text);
+            for (const concept of concepts) {
+              const { data: existing } = await supabase
+                .from("concepts")
+                .select("id")
+                .eq("brain_id", brainId)
+                .eq("name", concept.name)
+                .single();
+              if (!existing) {
+                await supabase.from("concepts").insert({
+                  brain_id: brainId,
+                  name: concept.name,
+                  description: concept.description,
+                  domain: concept.domain,
+                  importance_score: 0.6,
+                });
+                conceptsCreated++;
+              }
+            }
+            for (const rel of relationships) {
+              const { data: source } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.source).single();
+              const { data: target } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.target).single();
+              if (source && target) {
+                await supabase.from("relationships").insert({
+                  brain_id: brainId, source_concept_id: source.id, target_concept_id: target.id,
+                  relationship_type: rel.type, strength: 0.6,
+                });
+              }
+            }
+          } catch (err) {
+            logger.warn("Entity extraction failed for chat training", { error: errMsg(err) });
           }
         }
-        for (const rel of relationships) {
-          const { data: source } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.source).single();
-          const { data: target } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.target).single();
-          if (source && target) {
-            await supabase.from("relationships").insert({
-              brain_id: brainId, source_concept_id: source.id, target_concept_id: target.id,
-              relationship_type: rel.type, strength: 0.6,
-            });
-          }
-        }
+
+        // Increment brain version
+        await supabase
+          .from("brains")
+          .update({ version: (brain.version || 1) + 1, updated_at: new Date().toISOString() })
+          .eq("id", brainId);
       } catch (err) {
-        logger.warn("Entity extraction failed for chat training", { error: errMsg(err) });
+        logger.warn("Failed to store memory during chat training", { error: errMsg(err) });
       }
     }
 
-    // Increment brain version
-    await supabase
-      .from("brains")
-      .update({ version: (brain.version || 1) + 1, updated_at: new Date().toISOString() })
-      .eq("id", brainId);
+    // Generate AI response (like ChatGPT)
+    const chatHistory = Array.isArray(history) ? history.slice(-20) : [];
+    const systemPrompt = `You are NeuroVault's training assistant. The user is teaching their AI brain by chatting with you. Your job is to:
+1. Respond naturally and helpfully to whatever the user says, like ChatGPT would
+2. If the user shares knowledge or facts, acknowledge what you learned and ask follow-up questions to extract more knowledge
+3. If the user asks questions, answer them using your general knowledge
+4. Encourage the user to share more details, examples, and context — the more they share, the smarter their brain gets
+5. Be conversational, friendly, and concise
 
-    return NextResponse.json({ success: true, conceptsCreated });
+${stored ? `[System: The user's message was stored as a memory in their brain${conceptsCreated > 0 ? ` and ${conceptsCreated} new concept${conceptsCreated > 1 ? "s were" : " was"} extracted` : ""}.] ` : ""}`;
+
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: systemPrompt },
+      ...chatHistory,
+      { role: "user", content: text },
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      temperature: 0.7,
+      max_tokens: 1024,
+    });
+
+    const reply = completion.choices[0]?.message?.content || "I got that stored in your brain!";
+
+    return NextResponse.json({ reply, stored, conceptsCreated });
   } catch (err) {
     logger.error("Chat training failed", { error: errMsg(err) });
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
