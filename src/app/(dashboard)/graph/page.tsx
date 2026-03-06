@@ -10,6 +10,7 @@ import "reactflow/dist/style.css";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch, Loader2 } from "lucide-react";
 import { useBrainContext, useKnowledgeGraph, type Concept, type Relationship } from "@/lib/hooks";
+import { PageError } from "@/components/ui/page-error";
 
 const DOMAIN_COLORS: Record<string, string> = {
   "Machine Learning": "#7c5cfc",
@@ -22,7 +23,7 @@ const DOMAIN_COLORS: Record<string, string> = {
 
 export default function GraphPage() {
   const { activeBrainId } = useBrainContext();
-  const { data, isLoading } = useKnowledgeGraph(activeBrainId);
+  const { data, isLoading, error, refetch } = useKnowledgeGraph(activeBrainId);
 
   const { initialNodes, initialEdges } = useMemo(() => {
     if (!data) return { initialNodes: [], initialEdges: [] };
@@ -59,6 +60,8 @@ export default function GraphPage() {
 
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+
+  if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-full"><Loader2 className="w-6 h-6 text-primary animate-spin" /></div>;

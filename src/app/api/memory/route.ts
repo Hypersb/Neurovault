@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 const querySchema = z.object({
   brainId: z.string().uuid(),
   query: z.string().optional(),
@@ -38,7 +44,7 @@ export async function POST(request: Request) {
     q = q.limit(limit);
 
     const { data: memories, error } = await q;
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     // Get unique domains for filter
     const { data: domains } = await supabase
@@ -57,8 +63,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ memories: memories || [], domains: uniqueDomains, total: count || 0 });
   } catch (err) {
-    logger.error("Failed to fetch memories", { error: String(err) });
-    return NextResponse.json({ error: "Failed to fetch memories" }, { status: 500 });
+    logger.error("Failed to fetch memories", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }
 
@@ -70,11 +76,11 @@ export async function DELETE(request: Request) {
 
     const { id } = await request.json();
     const { error } = await supabase.from("memories").delete().eq("id", id);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    logger.error("Failed to delete memory", { error: String(err) });
-    return NextResponse.json({ error: "Failed to delete memory" }, { status: 500 });
+    logger.error("Failed to delete memory", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

@@ -2,6 +2,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 export async function GET(request: Request) {
   try {
     const supabase = createServerSupabase();
@@ -89,7 +95,7 @@ export async function GET(request: Request) {
       recentJobs: jobs || [],
     });
   } catch (err) {
-    logger.error("Failed to fetch health", { error: String(err) });
-    return NextResponse.json({ error: "Failed to fetch health" }, { status: 500 });
+    logger.error("Failed to fetch health", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

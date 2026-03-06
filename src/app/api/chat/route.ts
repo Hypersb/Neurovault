@@ -4,6 +4,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 const chatSchema = z.object({
   brainId: z.string().uuid(),
   message: z.string().min(1),
@@ -60,7 +66,7 @@ export async function POST(request: Request) {
           .in("id", memoryIds);
       }
     } catch (err) {
-      logger.warn("Memory retrieval failed, proceeding without context", { error: String(err) });
+      logger.warn("Memory retrieval failed, proceeding without context", { error: errMsg(err) });
     }
 
     // Build personality prompt
@@ -136,7 +142,7 @@ export async function POST(request: Request) {
 
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (err) {
-          logger.error("Stream error", { error: String(err) });
+          logger.error("Stream error", { error: errMsg(err) });
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "Stream failed" })}\n\n`));
         }
         controller.close();
@@ -151,7 +157,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
-    logger.error("Chat failed", { error: String(err) });
-    return NextResponse.json({ error: "Chat failed" }, { status: 500 });
+    logger.error("Chat failed", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

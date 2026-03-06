@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 const createBrainSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
@@ -20,7 +26,7 @@ export async function GET() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     // Auto-create a default brain if none exist
     if (!brains || brains.length === 0) {
@@ -30,14 +36,14 @@ export async function GET() {
         .select()
         .single();
 
-      if (createError) throw createError;
+      if (createError) throw new Error(createError.message);
       return NextResponse.json([newBrain]);
     }
 
     return NextResponse.json(brains);
   } catch (err) {
-    logger.error("Failed to fetch brains", { error: String(err) });
-    return NextResponse.json({ error: "Failed to fetch brains" }, { status: 500 });
+    logger.error("Failed to fetch brains", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }
 
@@ -59,12 +65,12 @@ export async function POST(request: Request) {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     logger.info("Brain created", { brainId: brain.id, userId: user.id });
     return NextResponse.json(brain, { status: 201 });
   } catch (err) {
-    logger.error("Failed to create brain", { error: String(err) });
-    return NextResponse.json({ error: "Failed to create brain" }, { status: 500 });
+    logger.error("Failed to create brain", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

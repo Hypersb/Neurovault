@@ -64,12 +64,24 @@ export interface Relationship {
   strength: number;
 }
 
+// ─── Helpers ──────────────────────────────────────────
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = typeof body?.error === "string" ? body.error : res.statusText || `Request failed (${res.status})`;
+    throw new Error(message);
+  }
+  return res.json();
+}
+
 // ─── Brain Context ─────────────────────────────────
 interface BrainContextValue {
   activeBrainId: string | null;
   setActiveBrainId: (id: string) => void;
   brains: Brain[];
   isLoading: boolean;
+  error: string | null;
 }
 
 const BrainContext = createContext<BrainContextValue>({
@@ -77,6 +89,7 @@ const BrainContext = createContext<BrainContextValue>({
   setActiveBrainId: () => {},
   brains: [],
   isLoading: true,
+  error: null,
 });
 
 export function useBrainContext() {
@@ -86,13 +99,10 @@ export function useBrainContext() {
 export function BrainProvider({ children }: { children: React.ReactNode }) {
   const [activeBrainId, setActiveBrainId] = useState<string | null>(null);
 
-  const { data: brains = [], isLoading } = useQuery<Brain[]>({
+  const { data: brains = [], isLoading, error } = useQuery<Brain[]>({
     queryKey: ["brains"],
-    queryFn: async () => {
-      const res = await fetch("/api/brains");
-      if (!res.ok) throw new Error("Failed to fetch brains");
-      return res.json();
-    },
+    queryFn: () => apiFetch<Brain[]>("/api/brains"),
+    retry: 1,
   });
 
   useEffect(() => {
@@ -101,8 +111,10 @@ export function BrainProvider({ children }: { children: React.ReactNode }) {
     }
   }, [brains, activeBrainId]);
 
+  const errorMessage = error ? (error instanceof Error ? error.message : String(error)) : null;
+
   return (
-    <BrainContext.Provider value={{ activeBrainId, setActiveBrainId, brains, isLoading }}>
+    <BrainContext.Provider value={{ activeBrainId, setActiveBrainId, brains, isLoading, error: errorMessage }}>
       {children}
     </BrainContext.Provider>
   );
@@ -132,15 +144,12 @@ export function useLogout() {
 export function useCreateBrain() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; description?: string }) => {
-      const res = await fetch("/api/brains", {
+    mutationFn: (data: { name: string; description?: string }) =>
+      apiFetch<Brain>("/api/brains", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to create brain");
-      return res.json();
-    },
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["brains"] }),
   });
 }
@@ -150,15 +159,12 @@ export function useMemories(brainId: string | null, query?: string, domain?: str
   return useQuery({
     queryKey: ["memories", brainId, query, domain, sort],
     enabled: !!brainId,
-    queryFn: async () => {
-      const res = await fetch("/api/memory", {
+    queryFn: () =>
+      apiFetch<{ memories: Memory[]; domains: string[]; total: number }>("/api/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brainId, query, domain, sort }),
-      });
-      if (!res.ok) throw new Error("Failed to fetch memories");
-      return res.json() as Promise<{ memories: Memory[]; domains: string[]; total: number }>;
-    },
+      }),
   });
 }
 
@@ -167,12 +173,8 @@ export function useTrainingJobs(brainId: string | null) {
   return useQuery<TrainingJob[]>({
     queryKey: ["training-jobs", brainId],
     enabled: !!brainId,
-    refetchInterval: 3000, // Poll every 3s for in-progress jobs
-    queryFn: async () => {
-      const res = await fetch(`/api/train?brainId=${brainId}`);
-      if (!res.ok) throw new Error("Failed to fetch jobs");
-      return res.json();
-    },
+    refetchInterval: 3000,
+    queryFn: () => apiFetch<TrainingJob[]>(`/api/train?brainId=${brainId}`),
   });
 }
 
@@ -183,9 +185,7 @@ export function useUploadTraining() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("brainId", brainId);
-      const res = await fetch("/api/train", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Upload failed");
-      return res.json();
+      return apiFetch<TrainingJob>("/api/train", { method: "POST", body: formData });
     },
     onSuccess: (_, { brainId }) => {
       qc.invalidateQueries({ queryKey: ["training-jobs", brainId] });
@@ -198,23 +198,17 @@ export function useKnowledgeGraph(brainId: string | null) {
   return useQuery({
     queryKey: ["graph", brainId],
     enabled: !!brainId,
-    queryFn: async () => {
-      const res = await fetch(`/api/graph?brainId=${brainId}`);
-      if (!res.ok) throw new Error("Failed to fetch graph");
-      return res.json() as Promise<{ concepts: Concept[]; relationships: Relationship[] }>;
-    },
+    queryFn: () =>
+      apiFetch<{ concepts: Concept[]; relationships: Relationship[] }>(`/api/graph?brainId=${brainId}`),
   });
 }
 
 // ─── Brain Health ──────────────────────────────────
 export function useBrainHealth(brainId: string | null) {
-  return useQuery({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return useQuery<any>({
     queryKey: ["health", brainId],
     enabled: !!brainId,
-    queryFn: async () => {
-      const res = await fetch(`/api/health?brainId=${brainId}`);
-      if (!res.ok) throw new Error("Failed to fetch health");
-      return res.json();
-    },
+    queryFn: () => apiFetch(`/api/health?brainId=${brainId}`),
   });
 }

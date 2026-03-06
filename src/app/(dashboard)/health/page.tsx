@@ -13,6 +13,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
 } from "recharts";
 import { useBrainContext, useBrainHealth } from "@/lib/hooks";
+import { PageError } from "@/components/ui/page-error";
 
 const fade = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } };
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } };
@@ -25,7 +26,9 @@ const severityColor: Record<string, string> = {
 
 export default function HealthPage() {
   const { activeBrainId } = useBrainContext();
-  const { data: health, isLoading } = useBrainHealth(activeBrainId);
+  const { data: health, isLoading, error, refetch } = useBrainHealth(activeBrainId);
+
+  if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
   if (isLoading || !health) {
     return (

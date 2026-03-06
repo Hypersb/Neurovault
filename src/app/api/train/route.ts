@@ -3,6 +3,12 @@ import { createEmbedding, extractEntities, summarizeText } from "@/lib/openai";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = createServerSupabase();
@@ -37,22 +43,22 @@ export async function POST(request: Request) {
         file_size: `${(file.size / 1024).toFixed(0)} KB`,
         status: "parsing",
         progress: 10,
-        stage: "Parsing document…",
+        stage: "Parsing document\u2026",
       })
       .select()
       .single();
 
-    if (jobError) throw jobError;
+    if (jobError) throw new Error(jobError.message);
 
     // Process in background (non-blocking)
     processFile(supabase, file, brainId, job.id).catch((err) => {
-      logger.error("Training pipeline failed", { error: String(err), jobId: job.id });
+      logger.error("Training pipeline failed", { error: errMsg(err), jobId: job.id });
     });
 
     return NextResponse.json(job, { status: 201 });
   } catch (err) {
-    logger.error("Training upload failed", { error: String(err) });
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    logger.error("Training upload failed", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }
 
@@ -72,11 +78,11 @@ export async function GET(request: Request) {
       .eq("brain_id", brainId)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return NextResponse.json(jobs || []);
   } catch (err) {
-    logger.error("Failed to fetch jobs", { error: String(err) });
-    return NextResponse.json({ error: "Failed to fetch jobs" }, { status: 500 });
+    logger.error("Failed to fetch jobs", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }
 
@@ -85,11 +91,11 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
   try {
     // Step 1: Parse
     const text = await file.text();
-    await updateJob(supabase, jobId, "parsing", 20, "Parsing document…");
+    await updateJob(supabase, jobId, "parsing", 20, "Parsing document\u2026");
 
     // Step 2: Chunk text
     const chunks = chunkText(text, 1000, 200);
-    await updateJob(supabase, jobId, "embedding", 40, "Generating embeddings…");
+    await updateJob(supabase, jobId, "embedding", 40, "Generating embeddings\u2026");
 
     // Step 3: Embed and store
     let memoriesCreated = 0;
@@ -98,7 +104,7 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
         const embedding = await createEmbedding(chunks[i]);
 
         // Determine domain from content
-        const domain = await getDomain(chunks[i]);
+        const domain = getDomain(chunks[i]);
 
         await supabase.from("memories").insert({
           brain_id: brainId,
@@ -112,15 +118,15 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
         });
         memoriesCreated++;
       } catch (err) {
-        logger.warn("Failed to embed chunk", { error: String(err), chunkIndex: i });
+        logger.warn("Failed to embed chunk", { error: errMsg(err), chunkIndex: i });
       }
 
       const progress = 40 + Math.round((i / chunks.length) * 25);
-      await updateJob(supabase, jobId, "embedding", progress, "Generating embeddings…");
+      await updateJob(supabase, jobId, "embedding", progress, "Generating embeddings\u2026");
     }
 
     // Step 4: Extract entities
-    await updateJob(supabase, jobId, "extracting", 70, "Extracting entities…");
+    await updateJob(supabase, jobId, "extracting", 70, "Extracting entities\u2026");
 
     let conceptsCreated = 0;
     // Process a summary of the full text for entity extraction
@@ -148,7 +154,7 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
     }
 
     // Step 5: Build graph relationships
-    await updateJob(supabase, jobId, "graph", 90, "Updating knowledge graph…");
+    await updateJob(supabase, jobId, "graph", 90, "Updating knowledge graph\u2026");
 
     for (const rel of relationships) {
       const { data: source } = await supabase
@@ -179,16 +185,22 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
     // Done
     await updateJob(supabase, jobId, "done", 100, "Completed", memoriesCreated, conceptsCreated);
 
-    // Update brain version
+    // Increment brain version
+    const { data: currentBrain } = await supabase
+      .from("brains")
+      .select("version")
+      .eq("id", brainId)
+      .single();
+
     await supabase
       .from("brains")
-      .update({ version: brainId, updated_at: new Date().toISOString() })
+      .update({ version: (currentBrain?.version || 1) + 1, updated_at: new Date().toISOString() })
       .eq("id", brainId);
 
     logger.info("Training complete", { jobId, memoriesCreated, conceptsCreated });
   } catch (err) {
-    logger.error("Training pipeline error", { error: String(err), jobId });
-    await updateJob(supabase, jobId, "error", 0, "Failed", 0, 0, String(err));
+    logger.error("Training pipeline error", { error: errMsg(err), jobId });
+    await updateJob(supabase, jobId, "error", 0, "Failed", 0, 0, errMsg(err));
   }
 }
 
@@ -214,7 +226,7 @@ function chunkText(text: string, chunkSize: number, overlap: number): string[] {
   return chunks;
 }
 
-async function getDomain(text: string): Promise<string> {
+function getDomain(text: string): string {
   const domains: Record<string, string[]> = {
     "Machine Learning": ["neural", "model", "training", "gradient", "loss", "epoch", "transformer", "attention", "embedding", "backprop"],
     "Systems Design": ["server", "database", "cache", "load balancer", "distributed", "latency", "throughput", "microservice", "API"],

@@ -10,6 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Lock, FileText, Mic, Globe, TrendingUp, Eye, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBrainContext, useMemories } from "@/lib/hooks";
+import { PageError } from "@/components/ui/page-error";
+
+function MessageIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+}
 
 const SOURCE_ICONS: Record<string, React.ReactNode> = {
   pdf:   <FileText className="w-3 h-3 text-red-400" />,
@@ -32,12 +37,14 @@ export default function MemoryPage() {
   const [sort, setSort] = useState("confidence");
   const [selected, setSelected] = useState<string | null>(null);
 
-  const { data, isLoading } = useMemories(activeBrainId, search || undefined, domain !== "all" ? domain : undefined, sort);
+  const { data, isLoading, error, refetch } = useMemories(activeBrainId, search || undefined, domain !== "all" ? domain : undefined, sort);
   const memories = data?.memories || [];
   const domains = data?.domains || [];
   const total = data?.total || 0;
 
   const selectedMemory = memories.find((m) => m.id === selected);
+
+  if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-5">
@@ -132,8 +139,4 @@ export default function MemoryPage() {
       </div>
     </div>
   );
-}
-
-function MessageIcon({ className }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
 }

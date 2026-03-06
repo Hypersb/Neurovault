@@ -2,6 +2,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 export async function GET(request: Request) {
   try {
     const supabase = createServerSupabase();
@@ -19,7 +25,7 @@ export async function GET(request: Request) {
       .eq("brain_id", brainId)
       .order("importance_score", { ascending: false });
 
-    if (cErr) throw cErr;
+    if (cErr) throw new Error(cErr.message);
 
     // Fetch relationships
     const { data: relationships, error: rErr } = await supabase
@@ -27,14 +33,14 @@ export async function GET(request: Request) {
       .select("*")
       .eq("brain_id", brainId);
 
-    if (rErr) throw rErr;
+    if (rErr) throw new Error(rErr.message);
 
     return NextResponse.json({
       concepts: concepts || [],
       relationships: relationships || [],
     });
   } catch (err) {
-    logger.error("Failed to fetch graph", { error: String(err) });
-    return NextResponse.json({ error: "Failed to fetch graph" }, { status: 500 });
+    logger.error("Failed to fetch graph", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

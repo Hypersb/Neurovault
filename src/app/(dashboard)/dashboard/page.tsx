@@ -5,13 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Database, GitBranch, Activity, TrendingUp, Zap, Loader2 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { useBrainContext, useBrainHealth } from "@/lib/hooks";
+import { PageError } from "@/components/ui/page-error";
 
 const CONF_COLORS = ["#22c55e", "#f59e0b", "#ef4444"];
 
 export default function DashboardPage() {
   const { activeBrainId, brains } = useBrainContext();
   const activeBrain = brains.find((b) => b.id === activeBrainId);
-  const { data: health, isLoading } = useBrainHealth(activeBrainId);
+  const { data: health, isLoading, error, refetch } = useBrainHealth(activeBrainId);
+
+  if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
   if (isLoading || !health) {
     return (
