@@ -4,9 +4,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export { genAI };
 
-// ─── Embeddings (text-embedding-004 → 768 dimensions) ─────────────
+// ─── Embeddings (gemini-embedding-001 → 3072 dimensions) ──────────
 export async function createEmbedding(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+  const model = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
   const result = await model.embedContent(text);
   return result.embedding.values;
 }
@@ -17,7 +17,7 @@ export async function extractEntities(text: string): Promise<{
   relationships: { source: string; target: string; type: string }[];
 }> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
     systemInstruction: `Extract key concepts and relationships from the text. Return JSON only:
 {
   "concepts": [{"name": "...", "description": "...", "domain": "..."}],
@@ -40,7 +40,7 @@ export async function extractEntities(text: string): Promise<{
 // ─── Summarization ────────────────────────────────────────────────
 export async function summarizeText(text: string): Promise<string> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
     systemInstruction: "Summarize the following text concisely, preserving key facts and insights.",
     generationConfig: { maxOutputTokens: 512, temperature: 0.3 },
   });
@@ -52,7 +52,7 @@ export async function summarizeText(text: string): Promise<string> {
 export async function transcribeAudio(file: File): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   const base64 = buffer.toString("base64");
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const result = await model.generateContent([
     { text: "Transcribe this audio accurately. Output only the transcription text, nothing else." },
     {

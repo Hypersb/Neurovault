@@ -250,7 +250,7 @@ ${stored ? `[System: The user's message was stored as a memory in their brain${c
     ];
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       systemInstruction: systemPrompt,
       generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
     });
