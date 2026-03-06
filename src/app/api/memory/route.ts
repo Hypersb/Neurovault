@@ -75,6 +75,24 @@ export async function DELETE(request: Request) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { id } = await request.json();
+    if (!id) return NextResponse.json({ error: "Memory id required" }, { status: 400 });
+
+    // Verify the memory belongs to a brain owned by this user
+    const { data: memory } = await supabase
+      .from("memories")
+      .select("brain_id")
+      .eq("id", id)
+      .single();
+    if (!memory) return NextResponse.json({ error: "Memory not found" }, { status: 404 });
+
+    const { data: brain } = await supabase
+      .from("brains")
+      .select("id")
+      .eq("id", memory.brain_id)
+      .eq("user_id", user.id)
+      .single();
+    if (!brain) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+
     const { error } = await supabase.from("memories").delete().eq("id", id);
     if (error) throw new Error(error.message);
 

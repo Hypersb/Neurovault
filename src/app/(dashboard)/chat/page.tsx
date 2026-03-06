@@ -30,6 +30,13 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Clear chat when switching brains
+  useEffect(() => {
+    setMessages([]);
+    setConversationId(null);
+    setInput("");
+  }, [activeBrainId]);
+
   async function handleSend() {
     if (!input.trim() || isStreaming || !activeBrainId) return;
 

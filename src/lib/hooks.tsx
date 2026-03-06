@@ -189,6 +189,40 @@ export function useUploadTraining() {
     },
     onSuccess: (_, { brainId }) => {
       qc.invalidateQueries({ queryKey: ["training-jobs", brainId] });
+      qc.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
+export function useChatTrain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ brainId, content }: { brainId: string; content: string }) =>
+      apiFetch<{ success: boolean; conceptsCreated: number }>("/api/train", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brainId, content }),
+      }),
+    onSuccess: (_, { brainId }) => {
+      qc.invalidateQueries({ queryKey: ["health", brainId] });
+      qc.invalidateQueries({ queryKey: ["memories", brainId] });
+      qc.invalidateQueries({ queryKey: ["graph", brainId] });
+    },
+  });
+}
+
+// ─── Delete Brain ─────────────────────────────────
+export function useDeleteBrain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (brainId: string) =>
+      apiFetch<{ success: boolean }>("/api/brains", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: brainId }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brains"] });
     },
   });
 }

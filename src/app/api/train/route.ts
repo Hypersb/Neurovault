@@ -3,6 +3,9 @@ import { createEmbedding, extractEntities, summarizeText } from "@/lib/openai";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
+// Allow up to 60s for training (Vercel Pro: 300s max)
+export const maxDuration = 60;
+
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
@@ -50,12 +53,21 @@ export async function POST(request: Request) {
 
     if (jobError) throw new Error(jobError.message);
 
-    // Process in background (non-blocking)
-    processFile(supabase, file, brainId, job.id).catch((err) => {
+    // Process synchronously — Vercel serverless kills background tasks after response
+    try {
+      await processFile(supabase, file, brainId, job.id);
+    } catch (err) {
       logger.error("Training pipeline failed", { error: errMsg(err), jobId: job.id });
-    });
+    }
 
-    return NextResponse.json(job, { status: 201 });
+    // Return the final job state
+    const { data: finalJob } = await supabase
+      .from("training_jobs")
+      .select("*")
+      .eq("id", job.id)
+      .single();
+
+    return NextResponse.json(finalJob || job, { status: 201 });
   } catch (err) {
     logger.error("Training upload failed", { error: errMsg(err) });
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
@@ -82,6 +94,97 @@ export async function GET(request: Request) {
     return NextResponse.json(jobs || []);
   } catch (err) {
     logger.error("Failed to fetch jobs", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
+  }
+}
+
+// PUT — Train via chat message (text input stored as memory)
+export async function PUT(request: Request) {
+  try {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { brainId, content } = await request.json();
+    if (!brainId || !content || typeof content !== "string" || content.trim().length < 10) {
+      return NextResponse.json({ error: "brainId and content (min 10 chars) required" }, { status: 400 });
+    }
+
+    // Verify brain ownership
+    const { data: brain } = await supabase
+      .from("brains")
+      .select("id, version")
+      .eq("id", brainId)
+      .eq("user_id", user.id)
+      .single();
+    if (!brain) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
+
+    const text = content.trim();
+
+    // Embed the text
+    const embedding = await createEmbedding(text);
+    const domain = getDomain(text);
+
+    // Store as memory
+    const { error: memErr } = await supabase.from("memories").insert({
+      brain_id: brainId,
+      content: text,
+      embedding,
+      source_type: "chat",
+      confidence_score: 0.85,
+      domain,
+      tags: [],
+      metadata: { source: "chat_training" },
+    });
+    if (memErr) throw new Error(memErr.message);
+
+    // Extract and store entities if text is substantial
+    let conceptsCreated = 0;
+    if (text.length > 50) {
+      try {
+        const { concepts, relationships } = await extractEntities(text);
+        for (const concept of concepts) {
+          const { data: existing } = await supabase
+            .from("concepts")
+            .select("id")
+            .eq("brain_id", brainId)
+            .eq("name", concept.name)
+            .single();
+          if (!existing) {
+            await supabase.from("concepts").insert({
+              brain_id: brainId,
+              name: concept.name,
+              description: concept.description,
+              domain: concept.domain,
+              importance_score: 0.6,
+            });
+            conceptsCreated++;
+          }
+        }
+        for (const rel of relationships) {
+          const { data: source } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.source).single();
+          const { data: target } = await supabase.from("concepts").select("id").eq("brain_id", brainId).eq("name", rel.target).single();
+          if (source && target) {
+            await supabase.from("relationships").insert({
+              brain_id: brainId, source_concept_id: source.id, target_concept_id: target.id,
+              relationship_type: rel.type, strength: 0.6,
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn("Entity extraction failed for chat training", { error: errMsg(err) });
+      }
+    }
+
+    // Increment brain version
+    await supabase
+      .from("brains")
+      .update({ version: (brain.version || 1) + 1, updated_at: new Date().toISOString() })
+      .eq("id", brainId);
+
+    return NextResponse.json({ success: true, conceptsCreated });
+  } catch (err) {
+    logger.error("Chat training failed", { error: errMsg(err) });
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }

@@ -18,6 +18,15 @@ export async function GET(request: Request) {
     const brainId = searchParams.get("brainId");
     if (!brainId) return NextResponse.json({ error: "brainId required" }, { status: 400 });
 
+    // Verify brain ownership
+    const { data: brainCheck } = await supabase
+      .from("brains")
+      .select("id")
+      .eq("id", brainId)
+      .eq("user_id", user.id)
+      .single();
+    if (!brainCheck) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
+
     // Memory stats
     const { count: memoryCount } = await supabase
       .from("memories")

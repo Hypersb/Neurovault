@@ -210,9 +210,8 @@ export default function SettingsPage() {
               <CardHeader className="pb-2 pt-4 px-4"><CardTitle className="text-sm font-medium">Security</CardTitle></CardHeader>
               <CardContent className="px-4 pb-4 space-y-4">
                 {[
-                  { label:"Memory encryption",    sub:"All memory content is AES-256 encrypted at rest", checked:true,  locked:true },
+                  { label:"Database encryption",    sub:"Supabase encrypts data at rest using AES-256",       checked:true,  locked:true },
                   { label:"Row-level security",   sub:"Supabase RLS ensures you only see your data",      checked:true,  locked:true },
-                  { label:"Rate limiting",         sub:"API calls are rate-limited per user",              checked:true,  locked:false },
                   { label:"Consent confirmation",  sub:"Require confirmation before training new data",    checked:false, locked:false },
                 ].map(({ label, sub, checked, locked }) => (
                   <div key={label} className="flex items-center justify-between">

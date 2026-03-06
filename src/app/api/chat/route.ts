@@ -90,7 +90,9 @@ export async function POST(request: Request) {
     }
 
     // Build messages
-    const systemPrompt = `You are NeuroVault, a personalized AI brain assistant. You have been trained on the user's knowledge and respond in their style. Use the retrieved memories to ground your responses in the user's actual knowledge. If you don't have relevant memories, say so honestly.${personalityPrompt}${memoryContext}`;
+    const systemPrompt = memoryContext
+      ? `You are NeuroVault, a personalized AI brain assistant. You have been trained on the user's knowledge and respond in their style. Use the retrieved memories to ground your responses in the user's actual knowledge. If the retrieved memories are not directly relevant to the question, you may supplement with your own general knowledge but mention that it comes from general knowledge, not the user's brain.${personalityPrompt}${memoryContext}`
+      : `You are NeuroVault, a personalized AI brain assistant. The user's brain has no trained memories relevant to this question, so answer using your general knowledge. Be helpful and informative. Let the user know they can train their brain with documents on the Train page to get more personalized responses.${personalityPrompt}`;
 
     const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
       { role: "system", content: systemPrompt },

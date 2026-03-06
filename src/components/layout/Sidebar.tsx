@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, MessageSquare, Zap, Database, GitBranch,
-  Activity, Settings, Brain, ChevronDown, Plus, Sparkles, LogOut,
+  Activity, Settings, Brain, ChevronDown, Plus, Sparkles, LogOut, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useBrainContext, useUser, useLogout, useCreateBrain } from "@/lib/hooks";
+import { useBrainContext, useUser, useLogout, useCreateBrain, useDeleteBrain } from "@/lib/hooks";
 import { useState } from "react";
 
 const navItems = [
@@ -28,10 +28,29 @@ export default function Sidebar() {
   const { data: user } = useUser();
   const logout = useLogout();
   const createBrain = useCreateBrain();
+  const deleteBrain = useDeleteBrain();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const initials = user?.user_metadata?.full_name
     ? user.user_metadata.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
     : user?.email?.slice(0, 2).toUpperCase() || "??";
+
+  function handleDelete(brainId: string) {
+    if (confirmDeleteId === brainId) {
+      deleteBrain.mutate(brainId, {
+        onSuccess: () => {
+          setConfirmDeleteId(null);
+          if (brainId === activeBrainId && brains.length > 1) {
+            const remaining = brains.find((b) => b.id !== brainId);
+            if (remaining) setActiveBrainId(remaining.id);
+          }
+        },
+      });
+    } else {
+      setConfirmDeleteId(brainId);
+      setTimeout(() => setConfirmDeleteId((prev) => prev === brainId ? null : prev), 3000);
+    }
+  }
 
   return (
     <aside className="w-60 shrink-0 h-screen flex flex-col border-r border-border bg-card">
@@ -71,17 +90,35 @@ export default function Sidebar() {
                   brains.map((brain) => (
                     <div
                       key={brain.id}
-                      onClick={() => setActiveBrainId(brain.id)}
                       className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors",
+                        "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors group",
                         brain.id === activeBrainId
                           ? "bg-primary/10 text-primary"
                           : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                       )}
                     >
-                      <div className={cn("w-1.5 h-1.5 rounded-full", brain.id === activeBrainId ? "bg-primary" : "bg-muted-foreground/40")} />
-                      <span className="truncate">{brain.name}</span>
-                      {brain.id === activeBrainId && <span className="ml-auto text-[9px] font-mono text-primary/70">active</span>}
+                      <div
+                        onClick={() => setActiveBrainId(brain.id)}
+                        className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer"
+                      >
+                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", brain.id === activeBrainId ? "bg-primary" : "bg-muted-foreground/40")} />
+                        <span className="truncate">{brain.name}</span>
+                        {brain.id === activeBrainId && <span className="ml-auto text-[9px] font-mono text-primary/70">active</span>}
+                      </div>
+                      {brains.length > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(brain.id); }}
+                          className={cn(
+                            "shrink-0 p-0.5 rounded transition-colors",
+                            confirmDeleteId === brain.id
+                              ? "text-red-400 bg-red-400/10"
+                              : "text-muted-foreground/0 group-hover:text-muted-foreground/60 hover:!text-red-400"
+                          )}
+                          title={confirmDeleteId === brain.id ? "Click again to confirm" : "Delete brain"}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   ))
                 )}
