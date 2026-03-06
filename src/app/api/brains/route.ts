@@ -93,6 +93,38 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json();
+    const { id, name, personality_profile, is_frozen } = body;
+    if (!id) return NextResponse.json({ error: "Brain id required" }, { status: 400 });
+
+    const { data: brain } = await supabase
+      .from("brains").select("id").eq("id", id).eq("user_id", user.id).single();
+    if (!brain) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updates: any = { updated_at: new Date().toISOString() };
+    if (name !== undefined) updates.name = name;
+    if (personality_profile !== undefined) updates.personality_profile = personality_profile;
+    if (is_frozen !== undefined) updates.is_frozen = is_frozen;
+
+    const { data, error } = await supabase
+      .from("brains").update(updates).eq("id", id).select().single();
+    if (error) throw new Error(error.message);
+
+    logger.info("Brain updated", { brainId: id, userId: user.id });
+    return NextResponse.json(data);
+  } catch (err) {
+    logger.error("Failed to update brain", { error: errMsg(err) });
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   try {
     const supabase = createServerSupabase();

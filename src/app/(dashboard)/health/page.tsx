@@ -1,18 +1,20 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Activity, Brain, TrendingUp, AlertCircle,
-  CheckCircle2, Archive, Download, RotateCcw, Trash2,
+  CheckCircle2, Archive, Download, Trash2,
   Zap, Database, GitBranch, Sparkles, Loader2,
 } from "lucide-react";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
 } from "recharts";
-import { useBrainContext, useBrainHealth } from "@/lib/hooks";
+import { useBrainContext, useBrainHealth, useDeleteBrain, useUpdateBrain } from "@/lib/hooks";
 import { PageError } from "@/components/ui/page-error";
 
 const fade = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } };
@@ -25,8 +27,13 @@ const severityColor: Record<string, string> = {
 };
 
 export default function HealthPage() {
-  const { activeBrainId } = useBrainContext();
+  const router = useRouter();
+  const { activeBrainId, brains } = useBrainContext();
   const { data: health, isLoading, error, refetch } = useBrainHealth(activeBrainId);
+  const deleteBrain = useDeleteBrain();
+  const updateBrain = useUpdateBrain();
+  const [exporting, setExporting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
@@ -47,7 +54,6 @@ export default function HealthPage() {
   const lowPct = totalConf > 0 ? Math.round((conf.low / totalConf) * 100) : 0;
   const domainCount = (health.domains || []).length;
 
-  // Compute cognitive profile scores from real data
   const radarData = [
     { metric: "Memory depth",    score: Math.min(100, Math.round(memoryCount / 2)) },
     { metric: "Concept density", score: memoryCount > 0 ? Math.min(100, Math.round((conceptCount / memoryCount) * 100)) : 0 },
@@ -59,6 +65,7 @@ export default function HealthPage() {
 
   const overallScore = Math.round(radarData.reduce((sum, d) => sum + d.score, 0) / radarData.length);
   const isHealthy = overallScore >= 50;
+  const isFrozen = health.brain?.is_frozen === true;
 
   const brainName = health.brain?.name || "Brain";
   const brainVersion = health.brain?.version || 1;
@@ -73,7 +80,6 @@ export default function HealthPage() {
     status: i === 0 ? "current" : "snapshot",
   }));
 
-  // Gap analysis from domains — suggest areas with fewer memories
   const allDomains = health.domains || [];
   const avgDomainCount = allDomains.length > 0 ? allDomains.reduce((s: number, d: { count: number }) => s + d.count, 0) / allDomains.length : 0;
   const gapAnalysis = allDomains
@@ -81,18 +87,82 @@ export default function HealthPage() {
     .map((d: { name: string; count: number }) => ({
       domain: d.name,
       severity: d.count <= 1 ? "high" : d.count <= 3 ? "medium" : "low",
-      suggestion: `Only ${d.count} memor${d.count === 1 ? "y" : "ies"} — consider adding more training data`,
+      suggestion: `Only ${d.count} memor${d.count === 1 ? "y" : "ies"} \u2014 consider adding more training data`,
     }));
+
+  async function handleExport() {
+    if (!activeBrainId) return;
+    setExporting(true);
+    try {
+      const [memRes, graphRes] = await Promise.all([
+        fetch("/api/memory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brainId: activeBrainId, limit: 100 }),
+        }),
+        fetch(`/api/graph?brainId=${activeBrainId}`),
+      ]);
+      const memData = await memRes.json();
+      const graphData = await graphRes.json();
+
+      const exportData = {
+        brain: health.brain,
+        memories: (memData.memories || []).map((m: Record<string, unknown>) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { embedding, ...rest } = m;
+          return rest;
+        }),
+        concepts: graphData.concepts || [],
+        relationships: graphData.relationships || [],
+        exportedAt: new Date().toISOString(),
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${brainName}-export.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+    }
+    setExporting(false);
+  }
+
+  async function handleFreeze() {
+    if (!activeBrainId) return;
+    await updateBrain.mutateAsync({ id: activeBrainId, is_frozen: !isFrozen });
+    refetch();
+  }
+
+  async function handleDeleteBrain() {
+    if (!activeBrainId || brains.length <= 1) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
+    await deleteBrain.mutateAsync(activeBrainId);
+    router.push("/dashboard");
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <motion.div variants={fade} initial="hidden" animate="show" className="flex items-center justify-between">
+      <motion.div variants={fade} initial="hidden" animate="show" className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="space-y-0.5">
           <h1 className="text-2xl font-semibold tracking-tight">Brain Health</h1>
           <p className="text-sm text-muted-foreground">{brainName} — version {brainVersion} — last updated {lastUpdatedLabel}</p>
         </div>
         <div className="flex items-center gap-2">
+          {isFrozen && (
+            <Badge className="bg-amber-400/10 text-amber-400 border-amber-400/20 gap-1.5">
+              <Archive className="w-3 h-3" /> Frozen
+            </Badge>
+          )}
           <Badge className={isHealthy ? "bg-emerald-400/10 text-emerald-400 border-emerald-400/20 gap-1.5" : "bg-amber-400/10 text-amber-400 border-amber-400/20 gap-1.5"}>
             {isHealthy ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
             {isHealthy ? "Healthy" : "Needs Training"}
@@ -255,16 +325,6 @@ export default function HealthPage() {
                       </div>
                       <p className="text-[11px] text-muted-foreground">{s.date}</p>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      {s.status !== "current" && (
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label="Restore">
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label="Export">
-                        <Download className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
                   </div>
                 ))
               ) : (
@@ -274,27 +334,55 @@ export default function HealthPage() {
           </Card>
         </motion.div>
 
-        {/* Danger zone */}
+        {/* Brain Actions */}
         <motion.div variants={fade}>
           <Card className="bg-card border-border">
             <CardHeader className="pb-2 pt-4 px-4">
               <CardTitle className="text-sm font-medium text-muted-foreground">Brain Actions</CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4 space-y-2">
-              {[
-                { icon: Download,   label: "Export Brain",    sub: "Download full brain as JSON",         variant: "outline" as const,      danger: false },
-                { icon: Archive,    label: "Legacy Mode",     sub: "Freeze brain to read-only state",     variant: "outline" as const,      danger: false },
-                { icon: Trash2,     label: "Delete Brain",    sub: "Permanently delete all data",         variant: "destructive" as const,  danger: true },
-              ].map(({ icon: Icon, label, sub, variant, danger }) => (
-                <div key={label} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${danger ? "border-destructive/20 bg-destructive/5" : "border-border bg-muted/20"}`}>
-                  <Icon className={`w-4 h-4 shrink-0 ${danger ? "text-destructive" : "text-muted-foreground"}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-medium ${danger ? "text-destructive" : ""}`}>{label}</p>
-                    <p className="text-[11px] text-muted-foreground">{sub}</p>
-                  </div>
-                  <Button variant={variant} size="sm" className="h-7 text-xs shrink-0">{label.split(" ")[0]}</Button>
+              {/* Export */}
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-muted/20">
+                <Download className="w-4 h-4 shrink-0 text-muted-foreground" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium">Export Brain</p>
+                  <p className="text-[11px] text-muted-foreground">Download full brain as JSON</p>
                 </div>
-              ))}
+                <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={handleExport} disabled={exporting}>
+                  {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Export"}
+                </Button>
+              </div>
+              {/* Freeze / Unfreeze */}
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-muted/20">
+                <Archive className="w-4 h-4 shrink-0 text-muted-foreground" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium">{isFrozen ? "Unfreeze Brain" : "Freeze Brain"}</p>
+                  <p className="text-[11px] text-muted-foreground">{isFrozen ? "Unfreeze to allow training and chat" : "Freeze brain to read-only state"}</p>
+                </div>
+                <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={handleFreeze} disabled={updateBrain.isPending}>
+                  {updateBrain.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : isFrozen ? "Unfreeze" : "Freeze"}
+                </Button>
+              </div>
+              {/* Delete */}
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-destructive/20 bg-destructive/5">
+                <Trash2 className="w-4 h-4 shrink-0 text-destructive" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-destructive">Delete Brain</p>
+                  <p className="text-[11px] text-muted-foreground">Permanently delete all data</p>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  onClick={handleDeleteBrain}
+                  disabled={brains.length <= 1 || deleteBrain.isPending}
+                >
+                  {deleteBrain.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : confirmDelete ? "Confirm?" : "Delete"}
+                </Button>
+              </div>
+              {brains.length <= 1 && (
+                <p className="text-[10px] text-muted-foreground text-center">Cannot delete your last brain</p>
+              )}
             </CardContent>
           </Card>
         </motion.div>

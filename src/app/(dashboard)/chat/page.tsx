@@ -23,6 +23,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Record<string, "up" | "down">>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -35,6 +36,7 @@ export default function ChatPage() {
     setMessages([]);
     setConversationId(null);
     setInput("");
+    setFeedback({});
   }, [activeBrainId]);
 
   async function handleSend() {
@@ -100,6 +102,13 @@ export default function ChatPage() {
     if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 160)}px`; }
   }
 
+  function toggleFeedback(msgId: string, type: "up" | "down") {
+    setFeedback((prev) => ({
+      ...prev,
+      [msgId]: prev[msgId] === type ? undefined as unknown as "up" : type,
+    }));
+  }
+
   return (
     <div className="flex flex-col h-screen">
       <div className="h-14 border-b border-border flex items-center px-5 gap-3 shrink-0">
@@ -109,7 +118,7 @@ export default function ChatPage() {
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
         </Badge>
         <div className="ml-auto">
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => { setMessages([]); setConversationId(null); }}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => { setMessages([]); setConversationId(null); setFeedback({}); }}>
             <RefreshCw className="w-3 h-3 mr-1" /> New chat
           </Button>
         </div>
@@ -141,9 +150,21 @@ export default function ChatPage() {
                   </p>
                   {msg.role === "assistant" && msg.content && !isStreaming && (
                     <div className="flex items-center gap-1 mt-2 pt-2 border-t border-border/50">
-                      <button onClick={() => navigator.clipboard.writeText(msg.content)} className="text-muted-foreground hover:text-foreground transition-colors p-1"><Copy className="w-3 h-3" /></button>
-                      <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><ThumbsUp className="w-3 h-3" /></button>
-                      <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><ThumbsDown className="w-3 h-3" /></button>
+                      <button onClick={() => navigator.clipboard.writeText(msg.content)} className="text-muted-foreground hover:text-foreground transition-colors p-1" title="Copy"><Copy className="w-3 h-3" /></button>
+                      <button
+                        onClick={() => toggleFeedback(msg.id, "up")}
+                        className={cn("transition-colors p-1", feedback[msg.id] === "up" ? "text-emerald-400" : "text-muted-foreground hover:text-foreground")}
+                        title="Good response"
+                      >
+                        <ThumbsUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => toggleFeedback(msg.id, "down")}
+                        className={cn("transition-colors p-1", feedback[msg.id] === "down" ? "text-red-400" : "text-muted-foreground hover:text-foreground")}
+                        title="Bad response"
+                      >
+                        <ThumbsDown className="w-3 h-3" />
+                      </button>
                     </div>
                   )}
                 </div>
@@ -162,7 +183,7 @@ export default function ChatPage() {
       <div className="border-t border-border p-4 shrink-0">
         <div className="max-w-3xl mx-auto">
           <div className="relative flex items-end gap-2 bg-card border border-border rounded-xl px-4 py-3 focus-within:border-primary/40 transition-colors">
-            <Textarea ref={textareaRef} value={input} onChange={(e) => { setInput(e.target.value); autoResize(); }} onKeyDown={handleKey} placeholder="Ask your brain anything…" rows={1} className="flex-1 resize-none bg-transparent border-0 p-0 text-sm focus-visible:ring-0 min-h-[24px] max-h-40" />
+            <Textarea ref={textareaRef} value={input} onChange={(e) => { setInput(e.target.value); autoResize(); }} onKeyDown={handleKey} placeholder="Ask your brain anything\u2026" rows={1} className="flex-1 resize-none bg-transparent border-0 p-0 text-sm focus-visible:ring-0 min-h-[24px] max-h-40" />
             <Button size="icon" onClick={handleSend} disabled={!input.trim() || isStreaming || !activeBrainId} className={cn("h-8 w-8 rounded-lg shrink-0", input.trim() ? "bg-primary hover:bg-primary/90" : "bg-muted")}>
               <Send className="w-3.5 h-3.5" />
             </Button>

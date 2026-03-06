@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import ReactFlow, {
   Node, Edge, Background, Controls, MiniMap,
@@ -25,10 +25,14 @@ export default function GraphPage() {
   const { activeBrainId } = useBrainContext();
   const { data, isLoading, error, refetch } = useKnowledgeGraph(activeBrainId);
 
-  const { initialNodes, initialEdges } = useMemo(() => {
-    if (!data) return { initialNodes: [], initialEdges: [] };
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-    const nodes: Node[] = data.concepts.map((c: Concept, i: number) => ({
+  // Update nodes/edges whenever data changes
+  useEffect(() => {
+    if (!data) return;
+
+    const newNodes: Node[] = data.concepts.map((c: Concept, i: number) => ({
       id: c.id,
       position: {
         x: 200 + Math.cos(i * 2.4) * (150 + i * 30),
@@ -45,7 +49,7 @@ export default function GraphPage() {
       },
     }));
 
-    const edges: Edge[] = data.relationships.map((r: Relationship) => ({
+    const newEdges: Edge[] = data.relationships.map((r: Relationship) => ({
       id: r.id,
       source: r.source_concept_id,
       target: r.target_concept_id,
@@ -55,11 +59,9 @@ export default function GraphPage() {
       labelStyle: { fontSize: "9px", fill: "#64748b" },
     }));
 
-    return { initialNodes: nodes, initialEdges: edges };
-  }, [data]);
-
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+    setNodes(newNodes);
+    setEdges(newEdges);
+  }, [data, setNodes, setEdges]);
 
   if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 

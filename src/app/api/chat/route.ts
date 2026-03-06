@@ -41,6 +41,11 @@ export async function POST(request: Request) {
     if (!brain) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
     if (brain.is_frozen) return NextResponse.json({ error: "Brain is in legacy mode" }, { status: 403 });
 
+    // Read retrieval settings from brain personality_profile
+    const pp = (brain.personality_profile || {}) as Record<string, unknown>;
+    const matchCount = typeof pp.topK === "number" ? pp.topK : 6;
+    const matchThreshold = typeof pp.confidenceThreshold === "number" ? pp.confidenceThreshold : 0.5;
+
     // Retrieve relevant memories via similarity search
     let memoryContext = "";
     try {
@@ -48,8 +53,8 @@ export async function POST(request: Request) {
       const { data: memories } = await supabase.rpc("match_memories", {
         query_embedding: queryEmbedding,
         match_brain_id: brainId,
-        match_threshold: 0.5,
-        match_count: 6,
+        match_threshold: matchThreshold,
+        match_count: matchCount,
       });
 
       if (memories && memories.length > 0) {
@@ -58,12 +63,14 @@ export async function POST(request: Request) {
             `- [${(m.confidence_score * 100).toFixed(0)}% confidence] ${m.content}`
           ).join("\n");
 
-        // Update usage_count and last_accessed for retrieved memories
-        const memoryIds = memories.map((m: { id: string }) => m.id);
-        await supabase
-          .from("memories")
-          .update({ usage_count: memories[0].usage_count + 1, last_accessed: new Date().toISOString() })
-          .in("id", memoryIds);
+        // Update usage_count and last_accessed for each memory individually
+        const now = new Date().toISOString();
+        for (const m of memories) {
+          await supabase
+            .from("memories")
+            .update({ usage_count: (m.usage_count || 0) + 1, last_accessed: now })
+            .eq("id", m.id);
+        }
       }
     } catch (err) {
       logger.warn("Memory retrieval failed, proceeding without context", { error: errMsg(err) });

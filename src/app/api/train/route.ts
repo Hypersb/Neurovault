@@ -12,6 +12,31 @@ function errMsg(err: unknown): string {
   return String(err);
 }
 
+async function extractTextFromFile(file: File): Promise<string> {
+  const name = file.name.toLowerCase();
+
+  // PDF
+  if (name.endsWith(".pdf") || file.type === "application/pdf") {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require("pdf-parse");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const data = await pdfParse(buffer);
+    return data.text;
+  }
+
+  // Audio — transcribe with Whisper
+  if (file.type.startsWith("audio/") || [".mp3", ".wav", ".m4a", ".ogg", ".webm"].some(ext => name.endsWith(ext))) {
+    const transcription = await openai.audio.transcriptions.create({
+      file: file,
+      model: "whisper-1",
+    });
+    return transcription.text;
+  }
+
+  // Text / Markdown / other
+  return file.text();
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = createServerSupabase();
@@ -225,7 +250,11 @@ ${stored ? `[System: The user's message was stored as a memory in their brain${c
 async function processFile(supabase: any, file: File, brainId: string, jobId: string) {
   try {
     // Step 1: Parse
-    const text = await file.text();
+    const text = await extractTextFromFile(file);
+    if (!text || text.trim().length < 10) {
+      await updateJob(supabase, jobId, "error", 0, "Failed", 0, 0, "Could not extract text from file");
+      return;
+    }
     await updateJob(supabase, jobId, "parsing", 20, "Parsing document\u2026");
 
     // Step 2: Chunk text

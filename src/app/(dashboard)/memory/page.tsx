@@ -5,11 +5,12 @@ import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Lock, FileText, Mic, Globe, TrendingUp, Eye, Loader2 } from "lucide-react";
+import { Search, FileText, Mic, Globe, TrendingUp, Eye, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useBrainContext, useMemories } from "@/lib/hooks";
+import { useBrainContext, useMemories, useDeleteMemory } from "@/lib/hooks";
 import { PageError } from "@/components/ui/page-error";
 
 function MessageIcon({ className }: { className?: string }) {
@@ -36,13 +37,26 @@ export default function MemoryPage() {
   const [domain, setDomain] = useState("all");
   const [sort, setSort] = useState("confidence");
   const [selected, setSelected] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useMemories(activeBrainId, search || undefined, domain !== "all" ? domain : undefined, sort);
+  const deleteMemory = useDeleteMemory();
   const memories = data?.memories || [];
   const domains = data?.domains || [];
   const total = data?.total || 0;
 
   const selectedMemory = memories.find((m) => m.id === selected);
+
+  function handleDelete(memoryId: string) {
+    setDeletingId(memoryId);
+    deleteMemory.mutate(memoryId, {
+      onSuccess: () => {
+        if (selected === memoryId) setSelected(null);
+        setDeletingId(null);
+      },
+      onError: () => setDeletingId(null),
+    });
+  }
 
   if (error) return <PageError message={error instanceof Error ? error.message : String(error)} onRetry={() => refetch()} />;
 
@@ -56,7 +70,7 @@ export default function MemoryPage() {
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories…" className="pl-8 h-8 text-sm bg-card" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories\u2026" className="pl-8 h-8 text-sm bg-card" />
         </div>
         <Select value={domain} onValueChange={setDomain}>
           <SelectTrigger className="w-44 h-8 text-sm bg-card"><SelectValue placeholder="Domain" /></SelectTrigger>
@@ -90,12 +104,19 @@ export default function MemoryPage() {
               <motion.div key={mem.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
                 <Card
                   onClick={() => setSelected(isSelected ? null : mem.id)}
-                  className={cn("bg-card border-border cursor-pointer transition-all hover:border-primary/30", isSelected && "border-primary/50 bg-primary/5")}
+                  className={cn("bg-card border-border cursor-pointer transition-all hover:border-primary/30 group", isSelected && "border-primary/50 bg-primary/5")}
                 >
                   <CardContent className="p-4 space-y-2.5">
                     <div className="flex items-start gap-2">
-                      <Lock className="w-3 h-3 text-muted-foreground mt-0.5 shrink-0" />
                       <p className="text-sm text-foreground/90 leading-relaxed line-clamp-2 flex-1">{mem.content}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDelete(mem.id); }}
+                        disabled={deletingId === mem.id}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive shrink-0"
+                        title="Delete memory"
+                      >
+                        {deletingId === mem.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      </button>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">{SOURCE_ICONS[mem.source_type] || SOURCE_ICONS.text} {mem.source_type}</span>
@@ -117,12 +138,23 @@ export default function MemoryPage() {
         </div>
 
         {selectedMemory && (
-          <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className="w-72 shrink-0">
+          <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className="w-72 shrink-0 hidden md:block">
             <Card className="bg-card border-primary/20 sticky top-0">
               <CardContent className="p-4 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium">Memory Detail</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium">Memory Detail</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(selectedMemory.id)}
+                    disabled={deletingId === selectedMemory.id}
+                  >
+                    {deletingId === selectedMemory.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  </Button>
                 </div>
                 <p className="text-xs text-foreground/80 leading-relaxed">{selectedMemory.content}</p>
                 <div className="space-y-2 text-xs text-muted-foreground">
@@ -130,7 +162,6 @@ export default function MemoryPage() {
                   <div className="flex justify-between"><span>Usage count</span><span className="font-mono">{selectedMemory.usage_count}</span></div>
                   <div className="flex justify-between"><span>Source</span><span className="capitalize">{selectedMemory.source_type}</span></div>
                   <div className="flex justify-between"><span>Domain</span><span>{selectedMemory.domain || "General"}</span></div>
-                  <div className="flex justify-between items-center"><span>Encrypted</span><Lock className="w-3 h-3 text-emerald-400" /></div>
                 </div>
               </CardContent>
             </Card>

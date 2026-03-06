@@ -227,6 +227,67 @@ export function useDeleteBrain() {
   });
 }
 
+// ─── Update Brain ─────────────────────────────────
+export function useUpdateBrain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { id: string; name?: string; personality_profile?: Record<string, unknown>; is_frozen?: boolean }) =>
+      apiFetch<Brain>("/api/brains", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brains"] });
+      qc.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
+// ─── Update Profile ───────────────────────────────
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { firstName: string; lastName: string }) =>
+      apiFetch<{ success: boolean }>("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["user"] }),
+  });
+}
+
+// ─── Change Password ──────────────────────────────
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: async (password: string) =>
+      apiFetch<{ success: boolean }>("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      }),
+  });
+}
+
+// ─── Delete Memory ────────────────────────────────
+export function useDeleteMemory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      apiFetch<{ success: boolean }>("/api/memory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["memories"] });
+      qc.invalidateQueries({ queryKey: ["health"] });
+      qc.invalidateQueries({ queryKey: ["graph"] });
+    },
+  });
+}
+
 // ─── Knowledge Graph ───────────────────────────────
 export function useKnowledgeGraph(brainId: string | null) {
   return useQuery({
