@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
-import { createEmbedding, extractEntities, summarizeText, openai } from "@/lib/openai";
+import { createEmbedding, extractEntities, summarizeText, transcribeAudio, genAI } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
@@ -33,13 +33,9 @@ async function extractTextFromFile(file: File): Promise<string> {
     }
   }
 
-  // Audio — transcribe with Whisper
+  // Audio — transcribe with Gemini
   if (file.type.startsWith("audio/") || [".mp3", ".wav", ".m4a", ".ogg", ".webm"].some(ext => name.endsWith(ext))) {
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: "whisper-1",
-    });
-    return transcription.text;
+    return transcribeAudio(file);
   }
 
   // Text / Markdown / other
@@ -233,10 +229,10 @@ export async function PUT(request: Request) {
       }
     }
 
-    // Generate AI response (like ChatGPT)
+    // Generate AI response
     const chatHistory = Array.isArray(history) ? history.slice(-20) : [];
     const systemPrompt = `You are NeuroVault's training assistant. The user is teaching their AI brain by chatting with you. Your job is to:
-1. Respond naturally and helpfully to whatever the user says, like ChatGPT would
+1. Respond naturally and helpfully to whatever the user says
 2. If the user shares knowledge or facts, acknowledge what you learned and ask follow-up questions to extract more knowledge
 3. If the user asks questions, answer them using your general knowledge
 4. Encourage the user to share more details, examples, and context — the more they share, the smarter their brain gets
@@ -244,20 +240,23 @@ export async function PUT(request: Request) {
 
 ${stored ? `[System: The user's message was stored as a memory in their brain${conceptsCreated > 0 ? ` and ${conceptsCreated} new concept${conceptsCreated > 1 ? "s were" : " was"} extracted` : ""}.] ` : ""}`;
 
-    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-      { role: "system", content: systemPrompt },
-      ...chatHistory,
-      { role: "user", content: text },
+    // Build Gemini contents
+    const geminiContents = [
+      ...chatHistory.map((m: { role: string; content: string }) => ({
+        role: m.role === "assistant" ? "model" as const : "user" as const,
+        parts: [{ text: m.content }],
+      })),
+      { role: "user" as const, parts: [{ text }] },
     ];
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages,
-      temperature: 0.7,
-      max_tokens: 1024,
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: systemPrompt,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
     });
 
-    const reply = completion.choices[0]?.message?.content || "I got that stored in your brain!";
+    const completion = await model.generateContent({ contents: geminiContents });
+    const reply = completion.response.text() || "I got that stored in your brain!";
 
     return NextResponse.json({ reply, stored, conceptsCreated });
   } catch (err) {

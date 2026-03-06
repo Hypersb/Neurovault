@@ -188,7 +188,7 @@ export default function ChatPage() {
               <Send className="w-3.5 h-3.5" />
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground text-center mt-2">Powered by GPT-4o mini with memory-augmented retrieval</p>
+          <p className="text-[10px] text-muted-foreground text-center mt-2">Powered by Gemini with memory-augmented retrieval</p>
         </div>
       </div>
     </div>

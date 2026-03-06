@@ -40,7 +40,7 @@ export default function SettingsPage() {
 
   // Brain settings state
   const [brainName, setBrainName] = useState("");
-  const [model, setModel] = useState("gpt4omini");
+  const [model, setModel] = useState("gemini-flash");
   const [autoReflection, setAutoReflection] = useState(true);
   const [kgUpdates, setKgUpdates] = useState(true);
   const [personalityInjection, setPersonalityInjection] = useState(true);
@@ -75,7 +75,7 @@ export default function SettingsPage() {
     if (activeBrain) {
       setBrainName(activeBrain.name);
       const pp = (activeBrain.personality_profile || {}) as Record<string, unknown>;
-      setModel((pp.model as string) || "gpt4omini");
+      setModel((pp.model as string) || "gemini-flash");
       setAutoReflection(pp.autoReflection !== false);
       setKgUpdates(pp.kgUpdates !== false);
       setPersonalityInjection(pp.personalityInjection !== false);
@@ -223,9 +223,9 @@ export default function SettingsPage() {
                   <Select value={model} onValueChange={setModel}>
                     <SelectTrigger className="h-8 text-sm bg-muted/40 max-w-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gpt4o">GPT-4o</SelectItem>
-                      <SelectItem value="gpt4omini">GPT-4o mini</SelectItem>
-                      <SelectItem value="gpt35">GPT-3.5 Turbo</SelectItem>
+                      <SelectItem value="gemini-flash">Gemini 1.5 Flash</SelectItem>
+                      <SelectItem value="gemini-pro">Gemini 1.5 Pro</SelectItem>
+                      <SelectItem value="gemini-2-flash">Gemini 2.0 Flash</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

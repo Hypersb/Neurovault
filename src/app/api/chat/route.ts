@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
-import { openai, createEmbedding } from "@/lib/openai";
+import { genAI, createEmbedding } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
@@ -105,33 +105,36 @@ export async function POST(request: Request) {
       }
     }
 
-    // Build messages
+    // Build system prompt
     const systemPrompt = memoryContext
       ? `You are NeuroVault, a personalized AI brain assistant. You have been trained on the user's knowledge and respond in their style. Use the retrieved memories to ground your responses in the user's actual knowledge. If the retrieved memories are not directly relevant to the question, you may supplement with your own general knowledge but mention that it comes from general knowledge, not the user's brain.${personalityPrompt}${memoryContext}`
       : `You are NeuroVault, a personalized AI brain assistant. The user's brain has no trained memories relevant to this question, so answer using your general knowledge. Be helpful and informative. Let the user know they can train their brain with documents on the Train page to get more personalized responses.${personalityPrompt}`;
 
-    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-      { role: "system", content: systemPrompt },
-      ...history,
-      { role: "user", content: message },
+    // Build Gemini contents (convert OpenAI format → Gemini format)
+    const geminiContents = [
+      ...history.map(msg => ({
+        role: msg.role === "assistant" ? "model" as const : "user" as const,
+        parts: [{ text: msg.content }],
+      })),
+      { role: "user" as const, parts: [{ text: message }] },
     ];
 
-    // Stream response
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 2048,
+    // Stream response via Gemini
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: systemPrompt,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     });
+
+    const result = await model.generateContentStream({ contents: geminiContents });
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
         let fullResponse = "";
         try {
-          for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content || "";
+          for await (const chunk of result.stream) {
+            const text = chunk.text();
             if (text) {
               fullResponse += text;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));

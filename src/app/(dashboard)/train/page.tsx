@@ -249,7 +249,7 @@ export default function TrainPage() {
                     <div>
                       <p className="text-sm font-medium">Chat to Train</p>
                       <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                        Chat naturally with your AI — it responds like ChatGPT while automatically storing everything you say as memories in your brain.
+                        Chat naturally with your AI — it responds conversationally while automatically storing everything you say as memories in your brain.
                       </p>
                     </div>
                   </div>
