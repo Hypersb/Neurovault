@@ -22,10 +22,19 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
     const parsed = chatSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      const msg = Object.entries(fieldErrors)
+        .map(([k, v]) => `${k}: ${(v || []).join(", ")}`)
+        .join("; ");
+      return NextResponse.json({ error: msg || "Invalid request data" }, { status: 400 });
     }
 
     const { brainId, message, conversationId } = parsed.data;

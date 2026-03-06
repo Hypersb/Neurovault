@@ -72,15 +72,21 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="px-4 pb-4">
               <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={confData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={3} dataKey="value">
-                      {confData.map((_, i) => (
-                        <Cell key={i} fill={CONF_COLORS[i]} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
+                {confData.some(d => d.value > 0) ? (
+                  <ResponsiveContainer width="100%" height={160}>
+                    <PieChart>
+                      <Pie data={confData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={3} dataKey="value">
+                        {confData.map((_, i) => (
+                          <Cell key={i} fill={CONF_COLORS[i]} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <p className="text-xs text-muted-foreground">No confidence data yet</p>
+                  </div>
+                )}
               </div>
               <div className="flex justify-center gap-4 text-[10px]">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />High ({confData[0].value})</span>

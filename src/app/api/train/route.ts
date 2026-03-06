@@ -17,11 +17,20 @@ async function extractTextFromFile(file: File): Promise<string> {
 
   // PDF
   if (name.endsWith(".pdf") || file.type === "application/pdf") {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require("pdf-parse");
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const data = await pdfParse(buffer);
-    return data.text;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require("pdf-parse");
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const data = await pdfParse(buffer);
+      return data.text;
+    } catch (err) {
+      logger.warn("pdf-parse failed, trying raw text extraction", { error: errMsg(err) });
+      // Fallback: try to extract raw text from the buffer
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const rawText = buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
+      if (rawText.length > 50) return rawText;
+      throw new Error("Could not extract text from PDF. The file may be scanned or image-based.");
+    }
   }
 
   // Audio — transcribe with Whisper
@@ -115,11 +124,16 @@ export async function GET(request: Request) {
       .eq("brain_id", brainId)
       .order("created_at", { ascending: false });
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      logger.warn("Failed to fetch training jobs", { error: error.message });
+      // Return empty array instead of 500 — table may not exist or RLS may block
+      return NextResponse.json([]);
+    }
     return NextResponse.json(jobs || []);
   } catch (err) {
     logger.error("Failed to fetch jobs", { error: errMsg(err) });
-    return NextResponse.json({ error: errMsg(err) }, { status: 500 });
+    // Return empty array to prevent client-side error loops from polling
+    return NextResponse.json([]);
   }
 }
 
@@ -130,7 +144,13 @@ export async function PUT(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { brainId, message, history } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+    const { brainId, message, history } = body;
     if (!brainId || !message || typeof message !== "string" || !message.trim()) {
       return NextResponse.json({ error: "brainId and message required" }, { status: 400 });
     }
