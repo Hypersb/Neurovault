@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
-import { createEmbedding, extractEntities, summarizeText, transcribeAudio, genAI } from "@/lib/ai";
+import { createEmbedding, createEmbeddingsBatch, extractEntities, summarizeText, transcribeAudio, genAI, GeminiRateLimitError } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 
@@ -280,34 +280,39 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
     const chunks = chunkText(text, 1000, 200);
     await updateJob(supabase, jobId, "embedding", 40, "Generating embeddings\u2026");
 
-    // Step 3: Embed and store
+    // Step 3: Embed and store — batch embeddings to reduce API calls
     let memoriesCreated = 0;
-    for (let i = 0; i < chunks.length; i++) {
+    const EMBED_BATCH_SIZE = 10;
+    const sourceType = file.name.endsWith(".pdf") ? "pdf" : file.name.endsWith(".mp3") || file.name.endsWith(".wav") ? "audio" : "text";
+
+    for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
+      const batchTexts = chunks.slice(i, i + EMBED_BATCH_SIZE);
+
       try {
-        const embedding = await createEmbedding(chunks[i]);
+        const embeddings = await createEmbeddingsBatch(batchTexts);
 
-        // Determine domain from content
-        const domain = getDomain(chunks[i]);
+        for (let j = 0; j < batchTexts.length; j++) {
+          const chunkIndex = i + j;
+          const domain = getDomain(batchTexts[j]);
+          const confidence = scoreChunkConfidence(batchTexts[j]);
 
-        // Quality-based confidence scoring instead of flat 0.8
-        const confidence = scoreChunkConfidence(chunks[i]);
-
-        await supabase.from("memories").insert({
-          brain_id: brainId,
-          content: chunks[i],
-          embedding,
-          source_type: file.name.endsWith(".pdf") ? "pdf" : file.name.endsWith(".mp3") || file.name.endsWith(".wav") ? "audio" : "text",
-          confidence_score: confidence,
-          domain,
-          tags: [],
-          metadata: { file_name: file.name, chunk_index: i, total_chunks: chunks.length },
-        });
-        memoriesCreated++;
+          await supabase.from("memories").insert({
+            brain_id: brainId,
+            content: batchTexts[j],
+            embedding: embeddings[j],
+            source_type: sourceType,
+            confidence_score: confidence,
+            domain,
+            tags: [],
+            metadata: { file_name: file.name, chunk_index: chunkIndex, total_chunks: chunks.length },
+          });
+          memoriesCreated++;
+        }
       } catch (err) {
-        logger.warn("Failed to embed chunk", { error: errMsg(err), chunkIndex: i });
+        logger.warn("Failed to embed batch", { error: errMsg(err), batchStart: i, batchSize: batchTexts.length });
       }
 
-      const progress = 40 + Math.round((i / chunks.length) * 25);
+      const progress = 40 + Math.round((Math.min(i + EMBED_BATCH_SIZE, chunks.length) / chunks.length) * 25);
       await updateJob(supabase, jobId, "embedding", progress, "Generating embeddings\u2026");
     }
 
@@ -331,10 +336,14 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
         // Large document: summarize in windows, then extract from each summary
         const windowCount = Math.min(Math.ceil(text.length / WINDOW_SIZE), 5); // Cap at 5 windows to stay within API limits
         for (let w = 0; w < windowCount; w++) {
+          // Delay between windows to avoid rate spikes
+          if (w > 0) await new Promise((r) => setTimeout(r, 1500));
+
           const start = w * WINDOW_SIZE;
           const windowText = text.slice(start, start + WINDOW_SIZE);
           try {
             const summary = await summarizeText(windowText);
+            await new Promise((r) => setTimeout(r, 500));
             const extracted = await extractEntities(summary);
             allConcepts.push(...extracted.concepts);
             allRelationships.push(...extracted.relationships);
@@ -424,8 +433,12 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
 
     logger.info("Training complete", { jobId, memoriesCreated, conceptsCreated });
   } catch (err) {
-    logger.error("Training pipeline error", { error: errMsg(err), jobId });
-    await updateJob(supabase, jobId, "error", 0, "Failed", 0, 0, errMsg(err));
+    const isRateLimit = err instanceof GeminiRateLimitError;
+    const message = isRateLimit
+      ? "Training paused due to AI rate limits. Please try again later."
+      : errMsg(err);
+    logger.error("Training pipeline error", { error: errMsg(err), jobId, isRateLimit });
+    await updateJob(supabase, jobId, "error", 0, "Failed", 0, 0, message);
   }
 }
 

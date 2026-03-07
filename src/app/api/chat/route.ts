@@ -1,5 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
-import { genAI, createEmbedding } from "@/lib/ai";
+import { genAI, createEmbedding, GeminiRateLimitError } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
@@ -162,7 +162,26 @@ export async function POST(request: Request) {
       generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     });
 
-    const result = await model.generateContentStream({ contents: geminiContents });
+    let result;
+    try {
+      result = await model.generateContentStream({ contents: geminiContents });
+    } catch (streamErr) {
+      if (streamErr instanceof GeminiRateLimitError) {
+        const encoder = new TextEncoder();
+        const readable = new ReadableStream({
+          start(controller) {
+            const msg = "I'm currently experiencing high demand. Please wait a moment and try again.";
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: msg })}\n\n`));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(readable, {
+          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+        });
+      }
+      throw streamErr;
+    }
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
@@ -228,6 +247,12 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     logger.error("Chat failed", { error: errMsg(err) });
+    if (err instanceof GeminiRateLimitError) {
+      return NextResponse.json(
+        { error: "The AI service is at capacity. Please try again in a few minutes." },
+        { status: 429 }
+      );
+    }
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
 }
