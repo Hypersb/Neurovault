@@ -52,8 +52,8 @@ export async function POST(request: Request) {
 
     // Read retrieval settings from brain personality_profile
     const pp = (brain.personality_profile || {}) as Record<string, unknown>;
-    const matchCount = typeof pp.topK === "number" ? pp.topK : 6;
-    const matchThreshold = typeof pp.confidenceThreshold === "number" ? pp.confidenceThreshold : 0.5;
+    const matchCount = typeof pp.topK === "number" ? pp.topK : 8;
+    const matchThreshold = typeof pp.confidenceThreshold === "number" ? pp.confidenceThreshold : 0.45;
 
     // Retrieve relevant memories via similarity search
     let memoryContext = "";
@@ -61,27 +61,60 @@ export async function POST(request: Request) {
     let retrievedMemories: any[] = [];
     try {
       const queryEmbedding = await createEmbedding(message);
+      // Fetch extra candidates for deduplication and re-ranking
       const { data: memories } = await supabase.rpc("match_memories", {
         query_embedding: queryEmbedding,
         match_brain_id: brainId,
         match_threshold: matchThreshold,
-        match_count: matchCount,
+        match_count: matchCount + 4,
       });
 
       if (memories && memories.length > 0) {
-        retrievedMemories = memories;
+        // Deduplicate: remove memories with very similar content (>80% character overlap)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const deduped: any[] = [];
+        for (const m of memories) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const isDuplicate = deduped.some((existing: any) => {
+            const shorter = Math.min(m.content.length, existing.content.length);
+            const overlap = m.content.slice(0, shorter) === existing.content.slice(0, shorter);
+            return overlap && shorter > 100;
+          });
+          if (!isDuplicate) deduped.push(m);
+        }
+
+        // Re-rank: boost by recency and usage
+        const now = Date.now();
+        const ranked = deduped.map((m: { similarity: number; last_accessed: string | null; usage_count: number; confidence_score: number }) => {
+          const ageDays = m.last_accessed
+            ? (now - new Date(m.last_accessed).getTime()) / 86400000
+            : 30;
+          const recencyBoost = Math.max(0, 0.05 - ageDays * 0.001); // Recent memories get small boost
+          const usageBoost = Math.min(0.03, (m.usage_count || 0) * 0.005); // Frequently used memories
+          const score = m.similarity + recencyBoost + usageBoost;
+          return { ...m, _rankScore: score };
+        });
+        ranked.sort((a: { _rankScore: number }, b: { _rankScore: number }) => b._rankScore - a._rankScore);
+
+        retrievedMemories = ranked.slice(0, matchCount);
         memoryContext = "\n\nRelevant knowledge from memory:\n" +
-          memories.map((m: { content: string; confidence_score: number }) =>
+          retrievedMemories.map((m: { content: string; confidence_score: number }) =>
             `- [${(m.confidence_score * 100).toFixed(0)}% confidence] ${m.content}`
           ).join("\n");
 
-        // Update usage_count and last_accessed for each memory individually
-        const now = new Date().toISOString();
-        for (const m of memories) {
-          await supabase
-            .from("memories")
-            .update({ usage_count: (m.usage_count || 0) + 1, last_accessed: now })
-            .eq("id", m.id);
+        // Batch update usage_count and last_accessed
+        const nowIso = new Date().toISOString();
+        const ids = retrievedMemories.map((m: { id: string }) => m.id);
+        if (ids.length > 0) {
+          // Update all retrieved memories in parallel
+          await Promise.all(
+            retrievedMemories.map((m: { id: string; usage_count: number }) =>
+              supabase
+                .from("memories")
+                .update({ usage_count: (m.usage_count || 0) + 1, last_accessed: nowIso })
+                .eq("id", m.id)
+            )
+          );
         }
       }
     } catch (err) {

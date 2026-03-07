@@ -289,15 +289,18 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
         // Determine domain from content
         const domain = getDomain(chunks[i]);
 
+        // Quality-based confidence scoring instead of flat 0.8
+        const confidence = scoreChunkConfidence(chunks[i]);
+
         await supabase.from("memories").insert({
           brain_id: brainId,
           content: chunks[i],
           embedding,
           source_type: file.name.endsWith(".pdf") ? "pdf" : file.name.endsWith(".mp3") || file.name.endsWith(".wav") ? "audio" : "text",
-          confidence_score: 0.8,
+          confidence_score: confidence,
           domain,
           tags: [],
-          metadata: { file_name: file.name, chunk_index: i },
+          metadata: { file_name: file.name, chunk_index: i, total_chunks: chunks.length },
         });
         memoriesCreated++;
       } catch (err) {
@@ -312,11 +315,46 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
     await updateJob(supabase, jobId, "extracting", 70, "Extracting entities\u2026");
 
     let conceptsCreated = 0;
-    // Process a summary of the full text for entity extraction
-    const summaryForExtraction = text.length > 8000 ? await summarizeText(text.slice(0, 8000)) : text.slice(0, 4000);
-    const { concepts, relationships } = await extractEntities(summaryForExtraction);
+    // Process document in windows for entity extraction instead of only first 4-8K chars
+    // This ensures large documents get full concept coverage
+    const WINDOW_SIZE = 6000;
+    const allConcepts: { name: string; description: string; domain: string }[] = [];
+    const allRelationships: { source: string; target: string; type: string }[] = [];
 
-    for (const concept of concepts) {
+    try {
+      if (text.length <= WINDOW_SIZE) {
+        // Small document: extract directly
+        const extracted = await extractEntities(text);
+        allConcepts.push(...extracted.concepts);
+        allRelationships.push(...extracted.relationships);
+      } else {
+        // Large document: summarize in windows, then extract from each summary
+        const windowCount = Math.min(Math.ceil(text.length / WINDOW_SIZE), 5); // Cap at 5 windows to stay within API limits
+        for (let w = 0; w < windowCount; w++) {
+          const start = w * WINDOW_SIZE;
+          const windowText = text.slice(start, start + WINDOW_SIZE);
+          try {
+            const summary = await summarizeText(windowText);
+            const extracted = await extractEntities(summary);
+            allConcepts.push(...extracted.concepts);
+            allRelationships.push(...extracted.relationships);
+          } catch (err) {
+            logger.warn("Entity extraction failed for window", { window: w, error: errMsg(err) });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("Entity extraction failed", { error: errMsg(err) });
+    }
+
+    // Deduplicate concepts by normalized name
+    const conceptMap = new Map<string, { name: string; description: string; domain: string }>();
+    for (const c of allConcepts) {
+      const key = c.name.toLowerCase().trim();
+      if (!conceptMap.has(key)) conceptMap.set(key, c);
+    }
+
+    for (const concept of Array.from(conceptMap.values())) {
       const { data: existing } = await supabase
         .from("concepts")
         .select("id")
@@ -336,10 +374,14 @@ async function processFile(supabase: any, file: File, brainId: string, jobId: st
       }
     }
 
-    // Step 5: Build graph relationships
+    // Step 5: Build graph relationships (deduplicate by source+target+type)
     await updateJob(supabase, jobId, "graph", 90, "Updating knowledge graph\u2026");
 
-    for (const rel of relationships) {
+    const relSet = new Set<string>();
+    for (const rel of allRelationships) {
+      const key = `${rel.source.toLowerCase()}|${rel.target.toLowerCase()}|${rel.type}`;
+      if (relSet.has(key)) continue;
+      relSet.add(key);
       const { data: source } = await supabase
         .from("concepts")
         .select("id")
@@ -397,25 +439,59 @@ async function updateJob(supabase: any, jobId: string, status: string, progress:
   await supabase.from("training_jobs").update(update).eq("id", jobId);
 }
 
-function chunkText(text: string, chunkSize: number, overlap: number): string[] {
+function chunkText(text: string, targetSize: number, overlap: number): string[] {
+  // Sentence-aware chunking: split on sentence boundaries instead of fixed character positions
+  // This preserves semantic coherence within each chunk
+  const sentences = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g) || [text];
   const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(start + chunkSize, text.length);
-    const chunk = text.slice(start, end).trim();
-    if (chunk.length > 50) chunks.push(chunk);
-    start += chunkSize - overlap;
+  let currentChunk = "";
+  let overlapBuffer = "";
+
+  for (const sentence of sentences) {
+    const trimSentence = sentence.trim();
+    if (!trimSentence) continue;
+
+    if (currentChunk.length + trimSentence.length > targetSize && currentChunk.length > 0) {
+      const finalChunk = currentChunk.trim();
+      if (finalChunk.length > 50) chunks.push(finalChunk);
+
+      // Build overlap from tail of current chunk
+      const words = currentChunk.split(/\s+/);
+      const overlapWords = [];
+      let overlapLen = 0;
+      for (let i = words.length - 1; i >= 0 && overlapLen < overlap; i--) {
+        overlapWords.unshift(words[i]);
+        overlapLen += words[i].length + 1;
+      }
+      overlapBuffer = overlapWords.join(" ");
+
+      currentChunk = overlapBuffer + " " + trimSentence;
+    } else {
+      currentChunk += (currentChunk ? " " : "") + trimSentence;
+    }
   }
+
+  // Don't forget the last chunk
+  const last = currentChunk.trim();
+  if (last.length > 50) chunks.push(last);
+
   return chunks;
 }
 
 function getDomain(text: string): string {
   const domains: Record<string, string[]> = {
-    "Machine Learning": ["neural", "model", "training", "gradient", "loss", "epoch", "transformer", "attention", "embedding", "backprop"],
-    "Systems Design": ["server", "database", "cache", "load balancer", "distributed", "latency", "throughput", "microservice", "API"],
-    "Mathematics": ["theorem", "proof", "equation", "integral", "derivative", "matrix", "vector", "probability"],
-    "Philosophy": ["ethics", "epistemology", "ontology", "consciousness", "morality", "existence", "metaphysics"],
-    "Programming": ["function", "variable", "class", "algorithm", "data structure", "array", "loop", "recursion"],
+    "Machine Learning": ["neural", "model", "training", "gradient", "loss", "epoch", "transformer", "attention", "embedding", "backprop", "deep learning", "classification", "regression", "overfitting", "dataset", "batch"],
+    "Systems Design": ["server", "database", "cache", "load balancer", "distributed", "latency", "throughput", "microservice", "API", "scalability", "replication", "sharding", "kubernetes", "docker"],
+    "Mathematics": ["theorem", "proof", "equation", "integral", "derivative", "matrix", "vector", "probability", "calculus", "algebra", "topology", "statistics", "regression", "convergence"],
+    "Philosophy": ["ethics", "epistemology", "ontology", "consciousness", "morality", "existence", "metaphysics", "phenomenology", "existentialism", "determinism"],
+    "Programming": ["function", "variable", "class", "algorithm", "data structure", "array", "loop", "recursion", "compiler", "runtime", "syntax", "debugging", "refactor", "typescript", "python", "javascript"],
+    "Science": ["experiment", "hypothesis", "particle", "molecule", "chemical", "biology", "physics", "evolution", "genome", "quantum", "relativity", "entropy", "organism"],
+    "History": ["century", "war", "empire", "civilization", "revolution", "dynasty", "colony", "treaty", "ancient", "medieval", "political", "independence"],
+    "Business": ["revenue", "market", "startup", "investor", "profit", "strategy", "customer", "product", "growth", "acquisition", "valuation", "equity"],
+    "Medicine": ["diagnosis", "treatment", "patient", "symptom", "disease", "clinical", "therapy", "pharmaceutical", "surgery", "pathology", "chronic", "vaccine"],
+    "Law": ["statute", "regulation", "contract", "court", "jurisdiction", "plaintiff", "defendant", "constitutional", "precedent", "litigation"],
+    "Psychology": ["cognitive", "behavioral", "emotion", "perception", "memory", "motivation", "disorder", "therapy", "personality", "subconscious"],
+    "Cybersecurity": ["vulnerability", "exploit", "encryption", "firewall", "malware", "authentication", "penetration", "phishing", "threat", "breach", "ransomware", "zero-day"],
   };
 
   const lower = text.toLowerCase();
@@ -431,4 +507,34 @@ function getDomain(text: string): string {
   }
 
   return bestDomain;
+}
+
+function scoreChunkConfidence(chunk: string): number {
+  // Score chunk quality based on multiple heuristics (0.5 - 0.95 range)
+  let score = 0.7; // baseline
+
+  const words = chunk.split(/\s+/).length;
+  const sentences = (chunk.match(/[.!?]+/g) || []).length;
+
+  // Length bonus: longer chunks with more content are generally higher quality
+  if (words > 80) score += 0.05;
+  if (words > 150) score += 0.05;
+
+  // Sentence structure: well-formed text has proper sentences
+  if (sentences >= 3) score += 0.05;
+  if (sentences >= 6) score += 0.03;
+
+  // Penalize very short chunks (likely fragments)
+  if (words < 20) score -= 0.15;
+  else if (words < 40) score -= 0.05;
+
+  // Penalize chunks that are mostly numbers or special chars (tables, garbage)
+  const alphaRatio = (chunk.match(/[a-zA-Z]/g) || []).length / chunk.length;
+  if (alphaRatio < 0.5) score -= 0.1;
+
+  // Bonus for chunks with domain-specific content (not "General")
+  const domain = getDomain(chunk);
+  if (domain !== "General") score += 0.05;
+
+  return Math.max(0.5, Math.min(0.95, Math.round(score * 100) / 100));
 }

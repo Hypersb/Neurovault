@@ -24,6 +24,11 @@ const DOMAIN_COLORS: Record<string, string> = {
   "Programming":      "#ef4444",
   "Science":          "#ec4899",
   "History":          "#f97316",
+  "Business":         "#06b6d4",
+  "Medicine":         "#10b981",
+  "Law":              "#8b5cf6",
+  "Psychology":       "#d946ef",
+  "Cybersecurity":    "#f43f5e",
   "General":          "#94a3b8",
 };
 
