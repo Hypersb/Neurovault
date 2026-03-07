@@ -11,9 +11,10 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { User, Brain, Shield, Zap, Key, Save, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { User, Brain, Shield, Zap, Key, Save, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBrainContext, useUser, useUpdateBrain, useUpdateProfile, useChangePassword } from "@/lib/hooks";
+import { toast } from "sonner";
 
 const sections = [
   { id: "profile",  label: "Profile",        icon: User   },
@@ -57,7 +58,6 @@ export default function SettingsPage() {
 
   // UI state
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
   // Initialize profile from user data
@@ -124,10 +124,10 @@ export default function SettingsPage() {
 
       await Promise.all(promises);
       setPassword("");
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      toast.success("Settings saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
+      toast.error("Failed to save settings");
     }
     setSaving(false);
   }
@@ -372,8 +372,8 @@ export default function SettingsPage() {
           )}
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving} size="sm" className="h-8 text-xs gap-1.5">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-              {saving ? "Saving\u2026" : saved ? "Saved!" : "Save changes"}
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {saving ? "Saving\u2026" : "Save changes"}
             </Button>
           </div>
         </motion.div>

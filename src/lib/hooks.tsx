@@ -298,6 +298,22 @@ export function useKnowledgeGraph(brainId: string | null) {
   });
 }
 
+// ─── Conversations ────────────────────────────────
+export interface Conversation {
+  id: string;
+  title: string;
+  updated_at: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+}
+
+export function useConversations(brainId: string | null) {
+  return useQuery<Conversation[]>({
+    queryKey: ["conversations", brainId],
+    enabled: !!brainId,
+    queryFn: () => apiFetch<Conversation[]>(`/api/chat?brainId=${brainId}`),
+  });
+}
+
 // ─── Brain Health ──────────────────────────────────
 export function useBrainHealth(brainId: string | null) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

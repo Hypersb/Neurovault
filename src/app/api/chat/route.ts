@@ -57,6 +57,8 @@ export async function POST(request: Request) {
 
     // Retrieve relevant memories via similarity search
     let memoryContext = "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let retrievedMemories: any[] = [];
     try {
       const queryEmbedding = await createEmbedding(message);
       const { data: memories } = await supabase.rpc("match_memories", {
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
       });
 
       if (memories && memories.length > 0) {
+        retrievedMemories = memories;
         memoryContext = "\n\nRelevant knowledge from memory:\n" +
           memories.map((m: { content: string; confidence_score: number }) =>
             `- [${(m.confidence_score * 100).toFixed(0)}% confidence] ${m.content}`
@@ -133,6 +136,19 @@ export async function POST(request: Request) {
       async start(controller) {
         let fullResponse = "";
         try {
+          // Send source citations first
+          if (retrievedMemories.length > 0) {
+            const sources = retrievedMemories.map((m: { id: string; content: string; source_type: string; confidence_score: number; domain: string | null; similarity: number }) => ({
+              id: m.id,
+              content: m.content.slice(0, 120),
+              source_type: m.source_type,
+              confidence: m.confidence_score,
+              domain: m.domain,
+              similarity: m.similarity,
+            }));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sources })}\n\n`));
+          }
+
           for await (const chunk of result.stream) {
             const text = chunk.text();
             if (text) {
@@ -180,5 +196,39 @@ export async function POST(request: Request) {
   } catch (err) {
     logger.error("Chat failed", { error: errMsg(err) });
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
+  }
+}
+
+// GET — List conversations for a brain
+export async function GET(request: Request) {
+  try {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { searchParams } = new URL(request.url);
+    const brainId = searchParams.get("brainId");
+    if (!brainId) return NextResponse.json({ error: "brainId required" }, { status: 400 });
+
+    // Verify brain ownership
+    const { data: brain } = await supabase
+      .from("brains")
+      .select("id")
+      .eq("id", brainId)
+      .eq("user_id", user.id)
+      .single();
+    if (!brain) return NextResponse.json({ error: "Brain not found" }, { status: 404 });
+
+    const { data: conversations } = await supabase
+      .from("conversations")
+      .select("id, title, updated_at, messages")
+      .eq("brain_id", brainId)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+
+    return NextResponse.json(conversations || []);
+  } catch (err) {
+    logger.error("Failed to fetch conversations", { error: errMsg(err) });
+    return NextResponse.json([], { status: 200 });
   }
 }

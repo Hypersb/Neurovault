@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { useBrainContext, useBrainHealth, useDeleteBrain, useUpdateBrain } from "@/lib/hooks";
 import { PageError } from "@/components/ui/page-error";
+import { toast } from "sonner";
 
 const fade = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } };
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } };
@@ -126,8 +127,10 @@ export default function HealthPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      toast.success("Brain exported successfully");
     } catch (err) {
       console.error("Export failed:", err);
+      toast.error("Export failed");
     }
     setExporting(false);
   }
@@ -136,6 +139,7 @@ export default function HealthPage() {
     if (!activeBrainId) return;
     await updateBrain.mutateAsync({ id: activeBrainId, is_frozen: !isFrozen });
     refetch();
+    toast.success(isFrozen ? "Brain unfrozen" : "Brain frozen");
   }
 
   async function handleDeleteBrain() {
@@ -146,6 +150,7 @@ export default function HealthPage() {
       return;
     }
     await deleteBrain.mutateAsync(activeBrainId);
+    toast.success("Brain deleted");
     router.push("/dashboard");
   }
 

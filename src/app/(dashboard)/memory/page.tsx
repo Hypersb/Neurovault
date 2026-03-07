@@ -8,10 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, FileText, Mic, Globe, TrendingUp, Eye, Loader2, Trash2 } from "lucide-react";
+import { Search, FileText, Mic, Globe, TrendingUp, Eye, Loader2, Trash2, Brain as BrainIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBrainContext, useMemories, useDeleteMemory } from "@/lib/hooks";
 import { PageError } from "@/components/ui/page-error";
+import { toast } from "sonner";
+import Link from "next/link";
 
 function MessageIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
@@ -53,8 +55,12 @@ export default function MemoryPage() {
       onSuccess: () => {
         if (selected === memoryId) setSelected(null);
         setDeletingId(null);
+        toast.success("Memory deleted");
       },
-      onError: () => setDeletingId(null),
+      onError: (err) => {
+        setDeletingId(null);
+        toast.error(err instanceof Error ? err.message : "Failed to delete memory");
+      },
     });
   }
 
@@ -95,7 +101,14 @@ export default function MemoryPage() {
             <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 text-primary animate-spin" /></div>
           )}
           {!isLoading && memories.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-12">No memories found. Train your brain to create memories.</p>
+            <div className="flex flex-col items-center justify-center py-16 space-y-3">
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <BrainIcon className="w-7 h-7 text-primary/40" />
+              </div>
+              <p className="text-sm text-muted-foreground">No memories found.</p>
+              <p className="text-xs text-muted-foreground/60">Train your brain with documents to create memories.</p>
+              <Link href="/train" className="text-xs text-primary hover:text-primary/80 transition-colors">Go to Training &rarr;</Link>
+            </div>
           )}
           {memories.map((mem, i) => {
             const color = confidenceColor(mem.confidence_score);
