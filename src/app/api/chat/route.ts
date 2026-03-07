@@ -13,7 +13,7 @@ function errMsg(err: unknown): string {
 const chatSchema = z.object({
   brainId: z.string().uuid(),
   message: z.string().min(1),
-  conversationId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().nullable().optional(),
 });
 
 export async function POST(request: Request) {

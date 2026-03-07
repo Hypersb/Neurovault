@@ -25,7 +25,13 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const parsed = querySchema.safeParse(body);
-    if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      const msg = Object.entries(fieldErrors)
+        .map(([k, v]) => `${k}: ${(v || []).join(", ")}`)
+        .join("; ");
+      return NextResponse.json({ error: msg || "Invalid request data" }, { status: 400 });
+    }
 
     const { brainId, query, domain, sort, limit } = parsed.data;
 
