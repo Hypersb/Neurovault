@@ -1,0 +1,14 @@
+{
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_SUPABASE_URL": "@neurovault_supabase_url",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@neurovault_supabase_anon_key",
+      "SUPABASE_SERVICE_ROLE_KEY": "@neurovault_supabase_service_role_key",
+      "DATABASE_URL": "@neurovault_database_url",
+      "OPENAI_API_KEY": "@neurovault_openai_api_key",
+      "ENCRYPTION_KEY": "@neurovault_encryption_key",
+      "SENTRY_DSN": "@neurovault_sentry_dsn",
+      "NEXT_PUBLIC_APP_URL": "@neurovault_app_url"
+    }
+  }
+}
