@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS memories (
   brain_id UUID REFERENCES brains(id) ON DELETE CASCADE NOT NULL,
   content TEXT NOT NULL,
   encrypted_content TEXT,
-  embedding vector(1536),
+  embedding vector(3072),
   source_type TEXT NOT NULL DEFAULT 'text',
   confidence_score FLOAT DEFAULT 0.8,
   usage_count INTEGER DEFAULT 0,
@@ -219,7 +219,7 @@ CREATE TRIGGER on_auth_user_created
 
 -- 13. Similarity search function
 CREATE OR REPLACE FUNCTION match_memories(
-  query_embedding vector(1536),
+  query_embedding vector(3072),
   match_brain_id UUID,
   match_threshold FLOAT DEFAULT 0.5,
   match_count INT DEFAULT 8

@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logger } from "@/lib/logger";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+export const EMBEDDING_DIMENSIONS = 3072;
 
 export { genAI };
 
@@ -105,12 +106,22 @@ async function retryWithBackoff<T>(
 
 // ─── Embeddings (gemini-embedding-001 → 3072 dimensions) ──────────
 
+export function assertEmbeddingDimensions(embedding: number[], context: string): void {
+  if (embedding.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(
+      `Embedding dimension mismatch in ${context}: expected ${EMBEDDING_DIMENSIONS}, got ${embedding.length}`
+    );
+  }
+}
+
 export async function createEmbedding(text: string): Promise<number[]> {
   return retryWithBackoff(
     async () => {
       const model = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
       const result = await model.embedContent(text);
-      return result.embedding.values;
+      const embedding = result.embedding.values;
+      assertEmbeddingDimensions(embedding, "createEmbedding");
+      return embedding;
     },
     { label: "createEmbedding" }
   );
@@ -132,7 +143,11 @@ export async function createEmbeddingsBatch(
           content: { role: "user", parts: [{ text }] },
         })),
       });
-      return result.embeddings.map((e) => e.values);
+      const embeddings = result.embeddings.map((e) => e.values);
+      embeddings.forEach((embedding, index) => {
+        assertEmbeddingDimensions(embedding, `createEmbeddingsBatch[index=${index}]`);
+      });
+      return embeddings;
     },
     { label: `createEmbeddingsBatch(${texts.length})` }
   );
